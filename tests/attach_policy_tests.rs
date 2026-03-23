@@ -5,6 +5,7 @@ use agentd::adapters::store::sqlite::SqliteStore;
 use agentd::app::App;
 use agentd::domain::agent::AgentState;
 use agentd::ports::store::StateStore;
+use serde_json::Value;
 use uuid::Uuid;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -103,9 +104,25 @@ async fn attach_retries_and_fails_on_provider_error() {
     let logs = store.get_logs(&agent_id, 20).expect("get logs");
     let provider_error_count = logs
         .iter()
-        .filter(|l| l.message.contains("provider error:"))
+        .filter(|l| l.message.contains("\"category\":\"provider_error\""))
         .count();
     assert_eq!(provider_error_count, 3);
+
+    let structured = logs
+        .iter()
+        .find(|l| l.message.contains("\"category\":\"provider_error\""))
+        .expect("provider error structured log exists");
+    let parsed: Value =
+        serde_json::from_str(&structured.message).expect("provider error log should be json");
+    assert_eq!(
+        parsed.get("context").and_then(Value::as_str),
+        Some("attach")
+    );
+    assert_eq!(parsed.get("provider").and_then(Value::as_str), Some("cli"));
+    assert_eq!(
+        parsed.get("category").and_then(Value::as_str),
+        Some("provider_error")
+    );
 }
 
 #[tokio::test]
@@ -148,7 +165,27 @@ async fn attach_retries_and_times_out() {
     let logs = store.get_logs(&agent_id, 20).expect("get logs");
     let timeout_count = logs
         .iter()
-        .filter(|l| l.message == "execution timed out")
+        .filter(|l| l.message.contains("\"category\":\"timeout\""))
         .count();
     assert_eq!(timeout_count, 2);
+
+    let structured = logs
+        .iter()
+        .find(|l| l.message.contains("\"category\":\"timeout\""))
+        .expect("timeout structured log exists");
+    let parsed: Value =
+        serde_json::from_str(&structured.message).expect("timeout log should be json");
+    assert_eq!(
+        parsed.get("context").and_then(Value::as_str),
+        Some("attach")
+    );
+    assert_eq!(parsed.get("provider").and_then(Value::as_str), Some("cli"));
+    assert_eq!(
+        parsed.get("category").and_then(Value::as_str),
+        Some("timeout")
+    );
+    assert_eq!(
+        parsed.get("message").and_then(Value::as_str),
+        Some("execution timed out")
+    );
 }

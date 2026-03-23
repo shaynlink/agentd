@@ -111,6 +111,10 @@ This document lists the next milestones required to evolve the current MVP into 
 - [ ] Improve error handling and observability
   - clearer error categories
   - structured logs (level, context, provider)
+  - Progress:
+    - app lifecycle and attach logs now use structured JSON payloads
+    - explicit error categories added (`provider_error`, `timeout`, `recovery`, `state_change`)
+    - integration tests now assert structured log fields for provider errors and timeouts
 
 - [ ] Add end-user documentation
   - add `README.md` with:

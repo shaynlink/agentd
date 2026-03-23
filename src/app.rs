@@ -20,6 +20,16 @@ pub struct App {
     store: SqliteStore,
 }
 
+fn structured_log_message(context: &str, provider: &str, category: &str, message: &str) -> String {
+    serde_json::json!({
+        "context": context,
+        "provider": provider,
+        "category": category,
+        "message": message,
+    })
+    .to_string()
+}
+
 impl App {
     pub fn new(db_path: String) -> Result<Self> {
         let store = SqliteStore::new(db_path);
@@ -29,7 +39,12 @@ impl App {
             let _ = store.append_log(
                 agent_id,
                 "warn",
-                "recovered after restart: running -> pending",
+                &structured_log_message(
+                    "startup",
+                    "system",
+                    "recovery",
+                    "recovered after restart: running -> pending",
+                ),
             );
         }
         if !recovered.is_empty() {
@@ -126,7 +141,9 @@ impl App {
             let _ = self.store.release_execution_lock(agent_id);
             return Err(err);
         }
-        if let Err(err) = self.store.append_log(agent_id, "info", "attach requested") {
+        let attach_requested =
+            structured_log_message("attach", &agent.provider, "lifecycle", "attach requested");
+        if let Err(err) = self.store.append_log(agent_id, "info", &attach_requested) {
             let _ = self.store.release_execution_lock(agent_id);
             return Err(err);
         }
@@ -155,15 +172,27 @@ impl App {
             match result {
                 Ok(Ok(done)) => {
                     self.store.update_state(agent_id, AgentState::Succeeded)?;
-                    self.store.append_log(agent_id, "info", &done.output)?;
+                    let output_log = structured_log_message(
+                        "attach",
+                        &agent.provider,
+                        "provider_output",
+                        &done.output,
+                    );
+                    self.store.append_log(agent_id, "info", &output_log)?;
                     let _ = self.store.release_execution_lock(agent_id);
                     println!("agent {agent_id} succeeded");
                     println!("{}", done.output);
                     return Ok(());
                 }
                 Ok(Err(err)) => {
-                    self.store
-                        .append_log(agent_id, "error", &format!("provider error: {err}"))?;
+                    let message = format!("provider error: {err}");
+                    let structured = structured_log_message(
+                        "attach",
+                        &agent.provider,
+                        "provider_error",
+                        &message,
+                    );
+                    self.store.append_log(agent_id, "error", &structured)?;
                     if attempt > retries {
                         self.store.update_state(agent_id, AgentState::Failed)?;
                         let _ = self.store.release_execution_lock(agent_id);
@@ -171,8 +200,13 @@ impl App {
                     }
                 }
                 Err(_) => {
-                    self.store
-                        .append_log(agent_id, "error", "execution timed out")?;
+                    let structured = structured_log_message(
+                        "attach",
+                        &agent.provider,
+                        "timeout",
+                        "execution timed out",
+                    );
+                    self.store.append_log(agent_id, "error", &structured)?;
                     if attempt > retries {
                         self.store.update_state(agent_id, AgentState::TimedOut)?;
                         let _ = self.store.release_execution_lock(agent_id);
@@ -205,14 +239,22 @@ impl App {
 
     pub fn pause(&self, agent_id: &str) -> Result<()> {
         self.store.update_state(agent_id, AgentState::Paused)?;
-        self.store.append_log(agent_id, "info", "paused")?;
+        self.store.append_log(
+            agent_id,
+            "info",
+            &structured_log_message("lifecycle", "unknown", "state_change", "paused"),
+        )?;
         println!("paused {agent_id}");
         Ok(())
     }
 
     pub fn resume(&self, agent_id: &str) -> Result<()> {
         self.store.update_state(agent_id, AgentState::Running)?;
-        self.store.append_log(agent_id, "info", "resumed")?;
+        self.store.append_log(
+            agent_id,
+            "info",
+            &structured_log_message("lifecycle", "unknown", "state_change", "resumed"),
+        )?;
         println!("resumed {agent_id}");
         Ok(())
     }
@@ -225,8 +267,16 @@ impl App {
         let _ = provider.cancel(agent_id).await;
         self.store.update_state(agent_id, AgentState::Cancelled)?;
         let _ = self.store.release_execution_lock(agent_id);
-        self.store
-            .append_log(agent_id, "info", "stopped/cancelled")?;
+        self.store.append_log(
+            agent_id,
+            "info",
+            &structured_log_message(
+                "lifecycle",
+                &agent.provider,
+                "state_change",
+                "stopped/cancelled",
+            ),
+        )?;
         println!("stopped {agent_id}");
         Ok(())
     }
@@ -465,7 +515,11 @@ impl App {
             attempts: 0,
         };
         self.store.create_agent(&agent)?;
-        self.store.append_log(&id, "info", "agent spawned")?;
+        self.store.append_log(
+            &id,
+            "info",
+            &structured_log_message("spawn", provider, "lifecycle", "agent spawned"),
+        )?;
         Ok(id)
     }
 }
