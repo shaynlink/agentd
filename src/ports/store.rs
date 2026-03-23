@@ -12,6 +12,9 @@ pub trait StateStore {
     fn get_agent(&self, agent_id: &str) -> Result<Option<AgentRecord>>;
     fn append_log(&self, agent_id: &str, level: &str, message: &str) -> Result<()>;
     fn get_logs(&self, agent_id: &str, limit: usize) -> Result<Vec<AgentLog>>;
+    fn try_acquire_execution_lock(&self, agent_id: &str, owner: &str) -> Result<bool>;
+    fn release_execution_lock(&self, agent_id: &str) -> Result<()>;
+    fn recover_stuck_executions(&self) -> Result<Vec<String>>;
 
     fn create_schedule(&self, schedule: &ScheduleRecord) -> Result<()>;
     fn list_schedules(&self, limit: usize) -> Result<Vec<ScheduleRecord>>;

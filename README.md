@@ -129,6 +129,8 @@ Notes:
 - recurring cron schedules are automatically re-planned to their next run after dispatch.
 - `cli` does not implement `plan-generate` yet.
 - `http` does not implement `plan-generate` yet.
+- restart recovery is automatic at startup: stale `running` agents are moved back to `pending`.
+- duplicate concurrent executions of the same agent are prevented by an execution lock.
 
 ### CLI Provider Configuration
 
@@ -236,7 +238,7 @@ Possible states:
 ## Known Limitations
 
 - `plan-generate` is only implemented by `mock` right now.
-- Scheduler and restart-recovery are not implemented yet.
+- scheduler is implemented, but there is no always-on daemon loop in this MVP.
 
 Scheduler status:
 

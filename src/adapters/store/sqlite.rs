@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, Error as RusqliteError, params};
+use rusqlite::{Connection, params};
 
 use crate::domain::agent::{AgentLog, AgentRecord, AgentState};
 use crate::domain::schedule::{ScheduleRecord, ScheduleRun, ScheduleState};
@@ -58,6 +58,13 @@ impl StateStore for SqliteStore {
 
             CREATE INDEX IF NOT EXISTS idx_agent_logs_agent_id_ts
                 ON agent_logs(agent_id, ts);
+
+            CREATE TABLE IF NOT EXISTS execution_locks (
+                agent_id TEXT PRIMARY KEY,
+                owner TEXT NOT NULL,
+                locked_at TEXT NOT NULL,
+                FOREIGN KEY(agent_id) REFERENCES agents(id)
+            );
 
             CREATE TABLE IF NOT EXISTS schedules (
                 id TEXT PRIMARY KEY,
@@ -223,6 +230,48 @@ impl StateStore for SqliteStore {
             out.push(row?);
         }
         Ok(out)
+    }
+
+    fn try_acquire_execution_lock(&self, agent_id: &str, owner: &str) -> Result<bool> {
+        let conn = self.open()?;
+        let changed = conn.execute(
+            "INSERT OR IGNORE INTO execution_locks (agent_id, owner, locked_at) VALUES (?1, ?2, ?3)",
+            params![agent_id, owner, Utc::now().to_rfc3339()],
+        )?;
+        Ok(changed > 0)
+    }
+
+    fn release_execution_lock(&self, agent_id: &str) -> Result<()> {
+        let conn = self.open()?;
+        conn.execute(
+            "DELETE FROM execution_locks WHERE agent_id = ?1",
+            params![agent_id],
+        )?;
+        Ok(())
+    }
+
+    fn recover_stuck_executions(&self) -> Result<Vec<String>> {
+        let mut conn = self.open()?;
+        let tx = conn.transaction()?;
+
+        let mut recovered_ids = Vec::new();
+        {
+            let mut stmt = tx.prepare("SELECT id FROM agents WHERE state = 'running'")?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                recovered_ids.push(row?);
+            }
+        }
+
+        tx.execute(
+            "UPDATE agents SET state = 'pending', updated_at = ?1 WHERE state = 'running'",
+            params![Utc::now().to_rfc3339()],
+        )?;
+
+        tx.execute("DELETE FROM execution_locks", [])?;
+        tx.commit()?;
+
+        Ok(recovered_ids)
     }
 
     fn create_schedule(&self, schedule: &ScheduleRecord) -> Result<()> {

@@ -24,6 +24,20 @@ impl App {
     pub fn new(db_path: String) -> Result<Self> {
         let store = SqliteStore::new(db_path);
         store.init()?;
+        let recovered = store.recover_stuck_executions()?;
+        for agent_id in &recovered {
+            let _ = store.append_log(
+                agent_id,
+                "warn",
+                "recovered after restart: running -> pending",
+            );
+        }
+        if !recovered.is_empty() {
+            println!(
+                "recovery: {} in-progress agent(s) moved to pending",
+                recovered.len()
+            );
+        }
         Ok(Self { store })
     }
 
@@ -95,16 +109,33 @@ impl App {
             bail!("agent not found: {agent_id}");
         };
 
-        self.store.update_state(agent_id, AgentState::Running)?;
-        self.store
-            .append_log(agent_id, "info", "attach requested")?;
+        let owner = format!("pid:{}", std::process::id());
+        let lock_acquired = self.store.try_acquire_execution_lock(agent_id, &owner)?;
+        if !lock_acquired {
+            bail!("agent {agent_id} is already running (execution lock held)");
+        }
+
+        if let Err(err) = self.store.update_state(agent_id, AgentState::Running) {
+            let _ = self.store.release_execution_lock(agent_id);
+            return Err(err);
+        }
+        if let Err(err) = self.store.append_log(agent_id, "info", "attach requested") {
+            let _ = self.store.release_execution_lock(agent_id);
+            return Err(err);
+        }
 
         let mut attempt = 0;
         loop {
             attempt += 1;
             self.store.bump_attempts(agent_id)?;
 
-            let provider = providers::build_provider(&agent.provider)?;
+            let provider = match providers::build_provider(&agent.provider) {
+                Ok(provider) => provider,
+                Err(err) => {
+                    let _ = self.store.release_execution_lock(agent_id);
+                    return Err(err);
+                }
+            };
             let req = ProviderRunRequest {
                 agent_id: agent.id.clone(),
                 prompt: agent.prompt.clone(),
@@ -116,6 +147,7 @@ impl App {
                 Ok(Ok(done)) => {
                     self.store.update_state(agent_id, AgentState::Succeeded)?;
                     self.store.append_log(agent_id, "info", &done.output)?;
+                    let _ = self.store.release_execution_lock(agent_id);
                     println!("agent {agent_id} succeeded");
                     println!("{}", done.output);
                     return Ok(());
@@ -125,6 +157,7 @@ impl App {
                         .append_log(agent_id, "error", &format!("provider error: {err}"))?;
                     if attempt > retries {
                         self.store.update_state(agent_id, AgentState::Failed)?;
+                        let _ = self.store.release_execution_lock(agent_id);
                         bail!("agent {agent_id} failed after {attempt} attempt(s): {err}");
                     }
                 }
@@ -133,6 +166,7 @@ impl App {
                         .append_log(agent_id, "error", "execution timed out")?;
                     if attempt > retries {
                         self.store.update_state(agent_id, AgentState::TimedOut)?;
+                        let _ = self.store.release_execution_lock(agent_id);
                         bail!("agent {agent_id} timed out after {attempt} attempt(s)");
                     }
                 }
@@ -181,6 +215,7 @@ impl App {
         let provider = providers::build_provider(&agent.provider)?;
         let _ = provider.cancel(agent_id).await;
         self.store.update_state(agent_id, AgentState::Cancelled)?;
+        let _ = self.store.release_execution_lock(agent_id);
         self.store
             .append_log(agent_id, "info", "stopped/cancelled")?;
         println!("stopped {agent_id}");

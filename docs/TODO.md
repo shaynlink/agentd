@@ -61,12 +61,16 @@ This document lists the next milestones required to evolve the current MVP into 
     - `schedule-list` implemented
     - `schedule-dispatch-due` implemented
 
-- [ ] Add restart recovery
+- [x] Add restart recovery
   - Extend SQLite schema to store in-progress execution
   - Rehydrate agents on startup
   - Prevent duplicate execution (idempotence)
   - Acceptance criteria:
     - after kill/restart, state remains consistent and execution can resume
+  - Progress:
+    - `execution_locks` table added
+    - startup recovery moves `running` agents to `pending`
+    - duplicate concurrent `attach` prevented by execution lock
 
 - [ ] Add real-time streaming
   - Live output while running `attach`
