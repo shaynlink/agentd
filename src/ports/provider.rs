@@ -7,6 +7,8 @@ pub struct ProviderRunRequest {
     pub agent_id: String,
     pub prompt: String,
     pub timeout_secs: u64,
+    pub stream_output: bool,
+    pub json_lines: bool,
 }
 
 #[derive(Debug, Clone)]

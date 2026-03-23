@@ -60,6 +60,10 @@ enum Commands {
         timeout_secs: u64,
         #[arg(long, default_value_t = 0)]
         retries: u32,
+        #[arg(long, default_value_t = true)]
+        stream: bool,
+        #[arg(long, default_value_t = false)]
+        json_lines: bool,
     },
     /// List all agents
     List,
@@ -166,7 +170,12 @@ pub async fn run() -> Result<()> {
             id,
             timeout_secs,
             retries,
-        } => app.attach(&id, timeout_secs, retries).await,
+            stream,
+            json_lines,
+        } => {
+            app.attach(&id, timeout_secs, retries, stream, json_lines)
+                .await
+        }
         Commands::List => app.list(),
         Commands::Pause { id } => app.pause(&id),
         Commands::Resume { id } => app.resume(&id),

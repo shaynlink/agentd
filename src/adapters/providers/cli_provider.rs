@@ -4,8 +4,10 @@ use std::process::Stdio;
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use tokio::io::AsyncWriteExt;
+use chrono::Utc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::mpsc;
 
 use crate::config::AppConfig;
 use crate::domain::plan::Plan;
@@ -101,6 +103,25 @@ async fn send_kill_signal(pid: i32, signal: &str) -> Result<bool> {
     Ok(status.success())
 }
 
+async fn forward_stream_lines<R>(
+    reader: R,
+    is_stderr: bool,
+    tx: mpsc::UnboundedSender<(bool, String)>,
+) -> Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut lines = BufReader::new(reader).lines();
+    while let Some(line) = lines
+        .next_line()
+        .await
+        .context("failed reading process output line")?
+    {
+        let _ = tx.send((is_stderr, line));
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl Provider for CliProvider {
     fn name(&self) -> &'static str {
@@ -153,6 +174,77 @@ impl Provider for CliProvider {
                 .shutdown()
                 .await
                 .context("failed to close CLI process stdin")?;
+        }
+
+        if request.stream_output {
+            let stdout = child
+                .stdout
+                .take()
+                .context("failed to capture stdout for streaming")?;
+            let stderr = child
+                .stderr
+                .take()
+                .context("failed to capture stderr for streaming")?;
+
+            let (tx, mut rx) = mpsc::unbounded_channel::<(bool, String)>();
+            let tx_out = tx.clone();
+            let tx_err = tx.clone();
+
+            let out_task =
+                tokio::spawn(async move { forward_stream_lines(stdout, false, tx_out).await });
+            let err_task =
+                tokio::spawn(async move { forward_stream_lines(stderr, true, tx_err).await });
+            drop(tx);
+
+            let mut combined_lines: Vec<String> = Vec::new();
+            while let Some((is_stderr, line)) = rx.recv().await {
+                combined_lines.push(line.clone());
+                if request.json_lines {
+                    let level = if is_stderr { "stderr" } else { "stdout" };
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "ts": Utc::now().to_rfc3339(),
+                            "agent_id": request.agent_id,
+                            "stream": level,
+                            "line": line,
+                        })
+                    );
+                } else if is_stderr {
+                    eprintln!("{line}");
+                } else {
+                    println!("{line}");
+                }
+            }
+
+            let out_res = out_task.await.context("stdout stream task join failed")?;
+            let err_res = err_task.await.context("stderr stream task join failed")?;
+            out_res?;
+            err_res?;
+
+            let status = child
+                .wait()
+                .await
+                .with_context(|| format!("failed waiting for CLI process: {}", cfg.command));
+            cleanup_pid(&pid_path);
+            let status = status?;
+
+            let combined = combined_lines.join("\n").trim().to_string();
+            if status.success() {
+                let output = if combined.is_empty() {
+                    "(cli provider completed with empty output)".to_string()
+                } else {
+                    combined
+                };
+                return Ok(ProviderRunResult { output });
+            }
+
+            let detail = if combined.is_empty() {
+                "no process output".to_string()
+            } else {
+                combined
+            };
+            bail!("cli command failed with status {}: {}", status, detail);
         }
 
         let output = child

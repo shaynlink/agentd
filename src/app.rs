@@ -104,7 +104,14 @@ impl App {
         Ok(())
     }
 
-    pub async fn attach(&self, agent_id: &str, timeout_secs: u64, retries: u32) -> Result<()> {
+    pub async fn attach(
+        &self,
+        agent_id: &str,
+        timeout_secs: u64,
+        retries: u32,
+        stream_output: bool,
+        json_lines: bool,
+    ) -> Result<()> {
         let Some(agent) = self.store.get_agent(agent_id)? else {
             bail!("agent not found: {agent_id}");
         };
@@ -140,6 +147,8 @@ impl App {
                 agent_id: agent.id.clone(),
                 prompt: agent.prompt.clone(),
                 timeout_secs,
+                stream_output,
+                json_lines,
             };
 
             let result = timeout(Duration::from_secs(timeout_secs), provider.run_agent(req)).await;
@@ -437,7 +446,8 @@ impl App {
         retries: u32,
     ) -> Result<String> {
         let id = self.spawn_agent_record(name, provider, prompt)?;
-        self.attach(&id, timeout_secs, retries).await?;
+        self.attach(&id, timeout_secs, retries, false, false)
+            .await?;
         Ok(id)
     }
 

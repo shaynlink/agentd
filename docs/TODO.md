@@ -72,11 +72,14 @@ This document lists the next milestones required to evolve the current MVP into 
     - startup recovery moves `running` agents to `pending`
     - duplicate concurrent `attach` prevented by execution lock
 
-- [ ] Add real-time streaming
+- [x] Add real-time streaming
   - Live output while running `attach`
   - Optional structured output (JSON lines)
   - Acceptance criteria:
     - continuous provider output is visible in real time
+  - Progress:
+    - `attach` supports `--stream` and `--json-lines`
+    - live streaming implemented for `cli` provider
 
 ## Priority P2 (Quality and Hardening)
 

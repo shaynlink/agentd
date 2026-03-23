@@ -105,7 +105,7 @@ Precedence order:
 | `plan-generate` | Generate a plan from a goal | `cargo run -- plan-generate --goal "prepare report" --output ./plan.yaml` |
 | `run-plan` | Execute a plan file | `cargo run -- run-plan --file ./plan.yaml` |
 | `spawn` | Create an agent record (no execution) | `cargo run -- spawn --name "demo" --prompt "Analyze objective" --timeout-secs 60 --retries 0` |
-| `attach` | Execute an existing agent | `cargo run -- attach --id <AGENT_ID> --timeout-secs 60 --retries 0` |
+| `attach` | Execute an existing agent | `cargo run -- attach --id <AGENT_ID> --timeout-secs 60 --retries 0 --stream true` |
 | `list` | List agents | `cargo run -- list` |
 | `status` | Show one agent status | `cargo run -- status --id <AGENT_ID>` |
 | `logs` | Show agent logs | `cargo run -- logs --id <AGENT_ID> --limit 100` |
@@ -123,6 +123,8 @@ Notes:
 - `--provider` is optional for `plan-generate`, `run-plan`, and `spawn`.
   If omitted, `default_provider` from config is used.
 - `run-plan` accepts YAML by default; JSON is used when file extension is `.json`.
+- `attach --stream true` enables live output while the provider runs.
+- `attach --json-lines true` emits structured JSON lines for streamed output.
 - `schedule-run-at --run-at` expects an RFC3339 datetime (UTC recommended).
 - `schedule-cron --cron` expects a cron expression (seconds precision).
 - `schedule-dispatch-due` executes schedules where state is `scheduled` and `run_at <= now`.
@@ -245,6 +247,11 @@ Scheduler status:
 - one-shot scheduling (`schedule-run-at`) is implemented
 - due dispatch (`schedule-dispatch-due`) is implemented
 - cron scheduling (`schedule-cron`) is implemented
+
+Streaming status:
+
+- real-time output streaming is implemented for `attach` with provider `cli`
+- optional structured output is available via `--json-lines true`
 
 ## Troubleshooting
 
