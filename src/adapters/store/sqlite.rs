@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::domain::agent::{AgentLog, AgentRecord, AgentState};
 use crate::domain::schedule::{ScheduleRecord, ScheduleRun, ScheduleState};
@@ -125,6 +125,27 @@ impl StateStore for SqliteStore {
 
     fn update_state(&self, agent_id: &str, state: AgentState) -> Result<()> {
         let conn = self.open()?;
+        let current: Option<String> = conn
+            .query_row(
+                "SELECT state FROM agents WHERE id = ?1",
+                params![agent_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        let Some(current) = current else {
+            bail!("agent not found: {agent_id}");
+        };
+
+        let current_state = current.parse().unwrap_or(AgentState::Failed);
+        if !current_state.can_transition_to(&state) {
+            bail!(
+                "invalid state transition for agent {agent_id}: {} -> {}",
+                current_state.as_str(),
+                state.as_str()
+            );
+        }
+
         conn.execute(
             "UPDATE agents SET state = ?1, updated_at = ?2 WHERE id = ?3",
             params![state.as_str(), Utc::now().to_rfc3339(), agent_id],

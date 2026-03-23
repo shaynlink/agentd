@@ -83,7 +83,7 @@ This document lists the next milestones required to evolve the current MVP into 
 
 ## Priority P2 (Quality and Hardening)
 
-- [ ] Enforce strict state transitions
+- [x] Enforce strict state transitions
   - Target file: `src/domain/agent.rs`
   - Block invalid transitions (`Succeeded -> Running`, etc.)
 

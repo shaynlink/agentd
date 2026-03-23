@@ -237,6 +237,11 @@ Possible states:
 - `cancelled`
 - `timed_out`
 
+State transitions are enforced:
+
+- terminal states (`succeeded`, `failed`, `cancelled`, `timed_out`) cannot transition to another state
+- invalid transitions return an explicit runtime error
+
 ## Known Limitations
 
 - `plan-generate` is only implemented by `mock` right now.

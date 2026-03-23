@@ -25,6 +25,22 @@ impl AgentState {
             Self::TimedOut => "timed_out",
         }
     }
+
+    pub fn can_transition_to(&self, next: &Self) -> bool {
+        if self == next {
+            return true;
+        }
+
+        match self {
+            Self::Pending => matches!(next, Self::Running | Self::Cancelled),
+            Self::Running => matches!(
+                next,
+                Self::Paused | Self::Succeeded | Self::Failed | Self::Cancelled | Self::TimedOut
+            ),
+            Self::Paused => matches!(next, Self::Running | Self::Cancelled),
+            Self::Succeeded | Self::Failed | Self::Cancelled | Self::TimedOut => false,
+        }
+    }
 }
 
 impl FromStr for AgentState {
