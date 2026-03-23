@@ -55,6 +55,11 @@ This document lists the next milestones required to evolve the current MVP into 
     - `schedule_runs` table
   - Acceptance criteria:
     - schedule command creates and triggers planned runs
+  - Progress:
+    - `schedule-run-at` implemented
+    - `schedule-list` implemented
+    - `schedule-dispatch-due` implemented
+    - cron expression support still pending
 
 - [ ] Add restart recovery
   - Extend SQLite schema to store in-progress execution

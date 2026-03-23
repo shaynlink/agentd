@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 
 use crate::domain::agent::{AgentLog, AgentRecord, AgentState};
+use crate::domain::schedule::{ScheduleRecord, ScheduleRun, ScheduleState};
 use crate::ports::store::StateStore;
 
 pub struct SqliteStore {
@@ -57,6 +58,36 @@ impl StateStore for SqliteStore {
 
             CREATE INDEX IF NOT EXISTS idx_agent_logs_agent_id_ts
                 ON agent_logs(agent_id, ts);
+
+            CREATE TABLE IF NOT EXISTS schedules (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                run_at TEXT NOT NULL,
+                timeout_secs INTEGER NOT NULL,
+                retries INTEGER NOT NULL,
+                state TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_schedules_run_at_state
+                ON schedules(run_at, state);
+
+            CREATE TABLE IF NOT EXISTS schedule_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                schedule_id TEXT NOT NULL,
+                agent_id TEXT,
+                started_at TEXT NOT NULL,
+                finished_at TEXT,
+                status TEXT NOT NULL,
+                error TEXT,
+                FOREIGN KEY(schedule_id) REFERENCES schedules(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule_id
+                ON schedule_runs(schedule_id, id DESC);
             "#,
         )
         .context("failed to initialize sqlite schema")?;
@@ -182,6 +213,157 @@ impl StateStore for SqliteStore {
                 ts: parse_ts(&ts).unwrap_or_else(|_| Utc::now()),
                 level: row.get(3)?,
                 message: row.get(4)?,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    fn create_schedule(&self, schedule: &ScheduleRecord) -> Result<()> {
+        let conn = self.open()?;
+        conn.execute(
+            "INSERT INTO schedules (id, name, provider, prompt, run_at, timeout_secs, retries, state, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                schedule.id,
+                schedule.name,
+                schedule.provider,
+                schedule.prompt,
+                schedule.run_at.to_rfc3339(),
+                schedule.timeout_secs as i64,
+                schedule.retries as i64,
+                schedule.state.as_str(),
+                schedule.created_at.to_rfc3339(),
+                schedule.updated_at.to_rfc3339(),
+            ],
+        )
+        .context("failed to insert schedule")?;
+        Ok(())
+    }
+
+    fn list_schedules(&self, limit: usize) -> Result<Vec<ScheduleRecord>> {
+        let conn = self.open()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, provider, prompt, run_at, timeout_secs, retries, state, created_at, updated_at
+             FROM schedules ORDER BY run_at ASC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            let run_at: String = row.get(4)?;
+            let state: String = row.get(7)?;
+            let created_at: String = row.get(8)?;
+            let updated_at: String = row.get(9)?;
+
+            Ok(ScheduleRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                provider: row.get(2)?,
+                prompt: row.get(3)?,
+                run_at: parse_ts(&run_at).unwrap_or_else(|_| Utc::now()),
+                timeout_secs: row.get::<_, i64>(5)? as u64,
+                retries: row.get::<_, i64>(6)? as u32,
+                state: state.parse().unwrap_or(ScheduleState::Failed),
+                created_at: parse_ts(&created_at).unwrap_or_else(|_| Utc::now()),
+                updated_at: parse_ts(&updated_at).unwrap_or_else(|_| Utc::now()),
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    fn list_due_schedules(&self, now_rfc3339: &str, limit: usize) -> Result<Vec<ScheduleRecord>> {
+        let conn = self.open()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, provider, prompt, run_at, timeout_secs, retries, state, created_at, updated_at
+             FROM schedules
+             WHERE state = 'scheduled' AND run_at <= ?1
+             ORDER BY run_at ASC
+             LIMIT ?2",
+        )?;
+
+        let rows = stmt.query_map(params![now_rfc3339, limit as i64], |row| {
+            let run_at: String = row.get(4)?;
+            let state: String = row.get(7)?;
+            let created_at: String = row.get(8)?;
+            let updated_at: String = row.get(9)?;
+
+            Ok(ScheduleRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                provider: row.get(2)?,
+                prompt: row.get(3)?,
+                run_at: parse_ts(&run_at).unwrap_or_else(|_| Utc::now()),
+                timeout_secs: row.get::<_, i64>(5)? as u64,
+                retries: row.get::<_, i64>(6)? as u32,
+                state: state.parse().unwrap_or(ScheduleState::Failed),
+                created_at: parse_ts(&created_at).unwrap_or_else(|_| Utc::now()),
+                updated_at: parse_ts(&updated_at).unwrap_or_else(|_| Utc::now()),
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    fn update_schedule_state(&self, schedule_id: &str, state: ScheduleState) -> Result<()> {
+        let conn = self.open()?;
+        conn.execute(
+            "UPDATE schedules SET state = ?1, updated_at = ?2 WHERE id = ?3",
+            params![state.as_str(), Utc::now().to_rfc3339(), schedule_id],
+        )
+        .with_context(|| format!("failed to update schedule state: {schedule_id}"))?;
+        Ok(())
+    }
+
+    fn append_schedule_run(
+        &self,
+        schedule_id: &str,
+        agent_id: Option<&str>,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.open()?;
+        let now = Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO schedule_runs (schedule_id, agent_id, started_at, finished_at, status, error)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![schedule_id, agent_id, now, now, status, error],
+        )
+        .with_context(|| format!("failed to append schedule run: {schedule_id}"))?;
+        Ok(())
+    }
+
+    fn get_schedule_runs(&self, schedule_id: &str, limit: usize) -> Result<Vec<ScheduleRun>> {
+        let conn = self.open()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, schedule_id, agent_id, started_at, finished_at, status, error
+             FROM schedule_runs
+             WHERE schedule_id = ?1
+             ORDER BY id DESC
+             LIMIT ?2",
+        )?;
+
+        let rows = stmt.query_map(params![schedule_id, limit as i64], |row| {
+            let started_at: String = row.get(3)?;
+            let finished_at: Option<String> = row.get(4)?;
+            Ok(ScheduleRun {
+                id: row.get(0)?,
+                schedule_id: row.get(1)?,
+                agent_id: row.get(2)?,
+                started_at: parse_ts(&started_at).unwrap_or_else(|_| Utc::now()),
+                finished_at: finished_at.as_deref().and_then(|ts| parse_ts(ts).ok()),
+                status: row.get(5)?,
+                error: row.get(6)?,
             })
         })?;
 

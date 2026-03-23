@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -10,6 +10,7 @@ use crate::adapters::providers;
 use crate::adapters::store::sqlite::SqliteStore;
 use crate::domain::agent::{AgentRecord, AgentState};
 use crate::domain::plan::Plan;
+use crate::domain::schedule::{ScheduleRecord, ScheduleState};
 use crate::ports::provider::ProviderRunRequest;
 use crate::ports::store::StateStore;
 
@@ -209,6 +210,112 @@ impl App {
         Ok(())
     }
 
+    pub fn schedule_run_at(
+        &self,
+        name: &str,
+        provider: &str,
+        prompt: &str,
+        run_at: DateTime<Utc>,
+        timeout_secs: u64,
+        retries: u32,
+    ) -> Result<()> {
+        let now = Utc::now();
+        let schedule = ScheduleRecord {
+            id: Uuid::new_v4().to_string(),
+            name: name.to_string(),
+            provider: provider.to_string(),
+            prompt: prompt.to_string(),
+            run_at,
+            timeout_secs,
+            retries,
+            state: ScheduleState::Scheduled,
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.store.create_schedule(&schedule)?;
+        println!(
+            "scheduled '{}' at {} (provider={})",
+            schedule.name, schedule.run_at, schedule.provider
+        );
+        println!("schedule_id={}", schedule.id);
+        Ok(())
+    }
+
+    pub fn list_schedules(&self, limit: usize) -> Result<()> {
+        let schedules = self.store.list_schedules(limit)?;
+        if schedules.is_empty() {
+            println!("no schedules found");
+            return Ok(());
+        }
+
+        for s in schedules {
+            println!(
+                "{} | {} | {} | {} | run_at={} | timeout={}s | retries={}",
+                s.id,
+                s.name,
+                s.provider,
+                s.state.as_str(),
+                s.run_at,
+                s.timeout_secs,
+                s.retries
+            );
+        }
+        Ok(())
+    }
+
+    pub async fn dispatch_due_schedules(&self, limit: usize) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        let due = self.store.list_due_schedules(&now, limit)?;
+        if due.is_empty() {
+            println!("no due schedules");
+            return Ok(());
+        }
+
+        println!("dispatching {} due schedule(s)", due.len());
+        for schedule in due {
+            self.store
+                .update_schedule_state(&schedule.id, ScheduleState::Running)?;
+
+            let outcome = self
+                .spawn_and_run(
+                    &schedule.name,
+                    &schedule.provider,
+                    &schedule.prompt,
+                    schedule.timeout_secs,
+                    schedule.retries,
+                )
+                .await;
+
+            match outcome {
+                Ok(agent_id) => {
+                    self.store.append_schedule_run(
+                        &schedule.id,
+                        Some(&agent_id),
+                        "succeeded",
+                        None,
+                    )?;
+                    self.store
+                        .update_schedule_state(&schedule.id, ScheduleState::Succeeded)?;
+                    println!("schedule {} succeeded (agent_id={})", schedule.id, agent_id);
+                }
+                Err(err) => {
+                    let error_text = err.to_string();
+                    self.store.append_schedule_run(
+                        &schedule.id,
+                        None,
+                        "failed",
+                        Some(&error_text),
+                    )?;
+                    self.store
+                        .update_schedule_state(&schedule.id, ScheduleState::Failed)?;
+                    println!("schedule {} failed: {}", schedule.id, error_text);
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn spawn_and_run(
         &self,
         name: &str,
@@ -216,9 +323,10 @@ impl App {
         prompt: &str,
         timeout_secs: u64,
         retries: u32,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let id = self.spawn_agent_record(name, provider, prompt)?;
-        self.attach(&id, timeout_secs, retries).await
+        self.attach(&id, timeout_secs, retries).await?;
+        Ok(id)
     }
 
     fn spawn_agent_record(&self, name: &str, provider: &str, prompt: &str) -> Result<String> {
