@@ -10,6 +10,7 @@ Provider-agnostic sub-agent orchestrator for CLI-driven workflows.
 - [Current Status](#current-status)
 - [Prerequisites](#prerequisites)
 - [Quickstart](#quickstart)
+- [Configuration](#configuration)
 - [CLI Commands](#cli-commands)
 - [Plan File Format](#plan-file-format)
 - [Agent State Model](#agent-state-model)
@@ -68,13 +69,42 @@ Use a custom database path (all commands support this):
 cargo run -- --db-path ./.agentd/state.db list
 ```
 
+## Configuration
+
+By default, `agentd` reads `agentd.toml` at repository root.
+You can override the path with `AGENTD_CONFIG`.
+
+Example config:
+
+```toml
+default_provider = "mock"
+
+[providers.cli]
+command = "cat"
+args = []
+prompt_mode = "stdin"
+prompt_flag = "--prompt"
+runtime_dir = "./.agentd/runtime"
+
+[providers.http]
+endpoint = "http://localhost:8080/run-agent"
+auth_mode = "none"
+api_key_header = "x-api-key"
+```
+
+Precedence order:
+
+1. Environment variables
+2. `agentd.toml`
+3. Built-in defaults
+
 ## CLI Commands
 
 | Command | Purpose | Example |
 | --- | --- | --- |
-| `plan-generate` | Generate a plan from a goal | `cargo run -- plan-generate --goal "prepare report" --provider mock --output ./plan.yaml` |
-| `run-plan` | Execute a plan file | `cargo run -- run-plan --file ./plan.yaml --provider mock` |
-| `spawn` | Create an agent record (no execution) | `cargo run -- spawn --name "demo" --prompt "Analyze objective" --provider mock --timeout-secs 60 --retries 0` |
+| `plan-generate` | Generate a plan from a goal | `cargo run -- plan-generate --goal "prepare report" --output ./plan.yaml` |
+| `run-plan` | Execute a plan file | `cargo run -- run-plan --file ./plan.yaml` |
+| `spawn` | Create an agent record (no execution) | `cargo run -- spawn --name "demo" --prompt "Analyze objective" --timeout-secs 60 --retries 0` |
 | `attach` | Execute an existing agent | `cargo run -- attach --id <AGENT_ID> --timeout-secs 60 --retries 0` |
 | `list` | List agents | `cargo run -- list` |
 | `status` | Show one agent status | `cargo run -- status --id <AGENT_ID>` |
@@ -86,6 +116,8 @@ cargo run -- --db-path ./.agentd/state.db list
 Notes:
 
 - `spawn` only creates the record. It does not run execution.
+- `--provider` is optional for `plan-generate`, `run-plan`, and `spawn`.
+  If omitted, `default_provider` from config is used.
 - `run-plan` accepts YAML by default; JSON is used when file extension is `.json`.
 - `cli` does not implement `plan-generate` yet.
 - `http` does not implement `plan-generate` yet.

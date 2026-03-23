@@ -1,4 +1,3 @@
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -8,6 +7,7 @@ use async_trait::async_trait;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
+use crate::config::AppConfig;
 use crate::domain::plan::Plan;
 use crate::ports::provider::{Provider, ProviderRunRequest, ProviderRunResult};
 
@@ -32,9 +32,9 @@ enum PromptMode {
 }
 
 impl PromptMode {
-    fn from_env() -> Self {
-        match env::var("AGENTD_CLI_PROMPT_MODE") {
-            Ok(value) if value.eq_ignore_ascii_case("arg") => Self::Arg,
+    fn from_value(value: &str) -> Self {
+        match value {
+            v if v.eq_ignore_ascii_case("arg") => Self::Arg,
             _ => Self::Stdin,
         }
     }
@@ -50,26 +50,16 @@ struct CliProviderConfig {
 }
 
 impl CliProviderConfig {
-    fn from_env() -> Result<Self> {
-        let command = env::var("AGENTD_CLI_COMMAND").unwrap_or_else(|_| "cat".to_string());
-        let args = match env::var("AGENTD_CLI_ARGS_JSON") {
-            Ok(raw) => serde_json::from_str::<Vec<String>>(&raw)
-                .context("AGENTD_CLI_ARGS_JSON must be a JSON string array")?,
-            Err(_) => Vec::new(),
-        };
-        let prompt_mode = PromptMode::from_env();
-        let prompt_flag =
-            env::var("AGENTD_CLI_PROMPT_FLAG").unwrap_or_else(|_| "--prompt".to_string());
-        let runtime_dir = PathBuf::from(
-            env::var("AGENTD_CLI_RUNTIME_DIR").unwrap_or_else(|_| "./.agentd/runtime".to_string()),
-        );
+    fn load() -> Result<Self> {
+        let cfg = AppConfig::load()?;
+        let cli_cfg = cfg.cli;
 
         Ok(Self {
-            command,
-            args,
-            prompt_mode,
-            prompt_flag,
-            runtime_dir,
+            command: cli_cfg.command,
+            args: cli_cfg.args,
+            prompt_mode: PromptMode::from_value(&cli_cfg.prompt_mode),
+            prompt_flag: cli_cfg.prompt_flag,
+            runtime_dir: cli_cfg.runtime_dir,
         })
     }
 
@@ -122,7 +112,7 @@ impl Provider for CliProvider {
     }
 
     async fn run_agent(&self, request: ProviderRunRequest) -> Result<ProviderRunResult> {
-        let cfg = CliProviderConfig::from_env()?;
+        let cfg = CliProviderConfig::load()?;
 
         let mut command = Command::new(&cfg.command);
         command.args(&cfg.args);
@@ -201,7 +191,7 @@ impl Provider for CliProvider {
     }
 
     async fn cancel(&self, agent_id: &str) -> Result<()> {
-        let cfg = CliProviderConfig::from_env()?;
+        let cfg = CliProviderConfig::load()?;
         let pid_path = cfg.pid_path(agent_id);
         if !pid_path.exists() {
             return Ok(());

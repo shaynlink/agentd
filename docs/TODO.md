@@ -10,6 +10,7 @@ This document lists the next milestones required to evolve the current MVP into 
 - `mock` provider is operational
 - `cli` provider is operational for execution (`run_agent`)
 - `http` provider is operational for execution (`run_agent`)
+- provider-agnostic config is available via `agentd.toml` + env overrides
 
 ## Priority P0 (Do First)
 
@@ -33,7 +34,7 @@ This document lists the next milestones required to evolve the current MVP into 
   - Acceptance criteria:
     - `--provider http` executes an agent against a remote API
 
-- [ ] Add provider-agnostic configuration
+- [x] Add provider-agnostic configuration
   - Proposed new files:
     - `src/config.rs`
     - `agentd.toml` (optional)

@@ -1,11 +1,10 @@
-use std::env;
-
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::config::AppConfig;
 use crate::domain::plan::Plan;
 use crate::ports::provider::{Provider, ProviderRunRequest, ProviderRunResult};
 
@@ -31,10 +30,10 @@ enum AuthMode {
 }
 
 impl AuthMode {
-    fn from_env() -> Self {
-        match env::var("AGENTD_HTTP_AUTH_MODE") {
-            Ok(value) if value.eq_ignore_ascii_case("bearer") => Self::Bearer,
-            Ok(value) if value.eq_ignore_ascii_case("api-key") => Self::ApiKey,
+    fn from_value(value: &str) -> Self {
+        match value {
+            v if v.eq_ignore_ascii_case("bearer") => Self::Bearer,
+            v if v.eq_ignore_ascii_case("api-key") => Self::ApiKey,
             _ => Self::None,
         }
     }
@@ -50,16 +49,17 @@ struct HttpProviderConfig {
 }
 
 impl HttpProviderConfig {
-    fn from_env() -> Self {
-        Self {
-            endpoint: env::var("AGENTD_HTTP_ENDPOINT")
-                .unwrap_or_else(|_| "http://localhost:8080/run-agent".to_string()),
-            auth_mode: AuthMode::from_env(),
-            bearer_token: env::var("AGENTD_HTTP_BEARER_TOKEN").ok(),
-            api_key: env::var("AGENTD_HTTP_API_KEY").ok(),
-            api_key_header: env::var("AGENTD_HTTP_API_KEY_HEADER")
-                .unwrap_or_else(|_| "x-api-key".to_string()),
-        }
+    fn load() -> Result<Self> {
+        let cfg = AppConfig::load()?;
+        let http_cfg = cfg.http;
+
+        Ok(Self {
+            endpoint: http_cfg.endpoint,
+            auth_mode: AuthMode::from_value(&http_cfg.auth_mode),
+            bearer_token: http_cfg.bearer_token,
+            api_key: http_cfg.api_key,
+            api_key_header: http_cfg.api_key_header,
+        })
     }
 
     fn build_headers(&self) -> Result<HeaderMap> {
@@ -137,7 +137,7 @@ impl Provider for HttpProvider {
     }
 
     async fn run_agent(&self, request: ProviderRunRequest) -> Result<ProviderRunResult> {
-        let cfg = HttpProviderConfig::from_env();
+        let cfg = HttpProviderConfig::load()?;
         let headers = cfg.build_headers()?;
 
         let payload = RunAgentPayload {

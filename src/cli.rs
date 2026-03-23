@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use crate::app::App;
+use crate::config::AppConfig;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -25,15 +26,15 @@ enum Commands {
     RunPlan {
         #[arg(long)]
         file: PathBuf,
-        #[arg(long, default_value = "mock")]
-        provider: String,
+        #[arg(long)]
+        provider: Option<String>,
     },
     /// Ask provider to generate a plan from a goal
     PlanGenerate {
         #[arg(long)]
         goal: String,
-        #[arg(long, default_value = "mock")]
-        provider: String,
+        #[arg(long)]
+        provider: Option<String>,
         #[arg(long)]
         output: Option<PathBuf>,
     },
@@ -43,8 +44,8 @@ enum Commands {
         name: String,
         #[arg(long)]
         prompt: String,
-        #[arg(long, default_value = "mock")]
-        provider: String,
+        #[arg(long)]
+        provider: Option<String>,
         #[arg(long, default_value_t = 60)]
         timeout_secs: u64,
         #[arg(long, default_value_t = 0)]
@@ -92,15 +93,23 @@ enum Commands {
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+    let config = AppConfig::load()?;
+    let default_provider = config.default_provider;
     let app = App::new(cli.db_path)?;
 
     match cli.command {
-        Commands::RunPlan { file, provider } => app.run_plan(&file, &provider).await,
+        Commands::RunPlan { file, provider } => {
+            let provider = provider.unwrap_or_else(|| default_provider.clone());
+            app.run_plan(&file, &provider).await
+        }
         Commands::PlanGenerate {
             goal,
             provider,
             output,
-        } => app.plan_generate(&provider, &goal, output.as_deref()).await,
+        } => {
+            let provider = provider.unwrap_or_else(|| default_provider.clone());
+            app.plan_generate(&provider, &goal, output.as_deref()).await
+        }
         Commands::Spawn {
             name,
             prompt,
@@ -108,6 +117,7 @@ pub async fn run() -> Result<()> {
             timeout_secs,
             retries,
         } => {
+            let provider = provider.unwrap_or_else(|| default_provider.clone());
             app.spawn(&name, &provider, &prompt, timeout_secs, retries)
                 .await
         }
