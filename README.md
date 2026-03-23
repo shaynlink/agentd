@@ -33,7 +33,7 @@ Core capabilities:
 | Area | Status |
 | --- | --- |
 | Provider `mock` | Implemented |
-| Provider `cli` | Stub |
+| Provider `cli` | Implemented for agent execution (`run_agent`) |
 | Provider `http` | Stub |
 | Persistence | SQLite (`./.agentd/state.db` by default) |
 
@@ -87,7 +87,36 @@ Notes:
 
 - `spawn` only creates the record. It does not run execution.
 - `run-plan` accepts YAML by default; JSON is used when file extension is `.json`.
-- Using providers `cli` or `http` currently returns a stub error.
+- `http` is still a stub.
+- `cli` does not implement `plan-generate` yet.
+
+### CLI Provider Configuration
+
+The `cli` provider reads environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AGENTD_CLI_COMMAND` | `cat` | Executable used to run the agent process |
+| `AGENTD_CLI_ARGS_JSON` | `[]` | JSON array of CLI arguments |
+| `AGENTD_CLI_PROMPT_MODE` | `stdin` | Prompt transport mode: `stdin` or `arg` |
+| `AGENTD_CLI_PROMPT_FLAG` | `--prompt` | Flag name used when mode is `arg` |
+| `AGENTD_CLI_RUNTIME_DIR` | `./.agentd/runtime` | PID file directory used for cancellation |
+
+Example (`stdin` mode):
+
+```bash
+AGENTD_CLI_COMMAND=cat cargo run -- attach --id <AGENT_ID>
+```
+
+Example (`arg` mode):
+
+```bash
+AGENTD_CLI_COMMAND=my-agent-cli \
+AGENTD_CLI_ARGS_JSON='["run"]' \
+AGENTD_CLI_PROMPT_MODE=arg \
+AGENTD_CLI_PROMPT_FLAG=--prompt \
+cargo run -- attach --id <AGENT_ID>
+```
 
 ## Plan File Format
 
@@ -137,8 +166,8 @@ Possible states:
 
 ## Known Limitations
 
-- Only `mock` is fully operational.
-- `cli` and `http` providers are present but not implemented.
+- `plan-generate` is only implemented by `mock` right now.
+- `http` provider is not implemented.
 - Scheduler and restart-recovery are not implemented yet.
 
 ## Troubleshooting

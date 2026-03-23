@@ -12,7 +12,7 @@ This document lists the next milestones required to evolve the current MVP into 
 
 ## Priority P0 (Do First)
 
-- [ ] Implement concrete CLI provider
+- [x] Implement concrete CLI provider
   - Target file: `src/adapters/providers/cli_provider.rs`
   - Minimum support:
     - spawn a configurable process (command + args)
