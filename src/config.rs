@@ -18,6 +18,11 @@ pub struct CliProviderConfig {
     pub prompt_mode: String,
     pub prompt_flag: String,
     pub runtime_dir: PathBuf,
+    pub plan_command: String,
+    pub plan_args: Vec<String>,
+    pub plan_goal_mode: String,
+    pub plan_goal_flag: String,
+    pub plan_output_format: String,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +53,11 @@ struct FileCliProviderConfig {
     prompt_mode: Option<String>,
     prompt_flag: Option<String>,
     runtime_dir: Option<PathBuf>,
+    plan_command: Option<String>,
+    plan_args: Option<Vec<String>>,
+    plan_goal_mode: Option<String>,
+    plan_goal_flag: Option<String>,
+    plan_output_format: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -100,6 +110,35 @@ impl AppConfig {
             .or_else(|| file_cli.and_then(|c| c.runtime_dir.clone()))
             .unwrap_or_else(|| PathBuf::from("./.agentd/runtime"));
 
+        let plan_command = env::var("AGENTD_CLI_PLAN_COMMAND")
+            .ok()
+            .or_else(|| file_cli.and_then(|c| c.plan_command.clone()))
+            .unwrap_or_else(|| command.clone());
+
+        let plan_args = if let Ok(raw) = env::var("AGENTD_CLI_PLAN_ARGS_JSON") {
+            serde_json::from_str::<Vec<String>>(&raw)
+                .context("AGENTD_CLI_PLAN_ARGS_JSON must be a JSON string array")?
+        } else {
+            file_cli
+                .and_then(|c| c.plan_args.clone())
+                .unwrap_or_else(|| args.clone())
+        };
+
+        let plan_goal_mode = env::var("AGENTD_CLI_PLAN_GOAL_MODE")
+            .ok()
+            .or_else(|| file_cli.and_then(|c| c.plan_goal_mode.clone()))
+            .unwrap_or_else(|| prompt_mode.clone());
+
+        let plan_goal_flag = env::var("AGENTD_CLI_PLAN_GOAL_FLAG")
+            .ok()
+            .or_else(|| file_cli.and_then(|c| c.plan_goal_flag.clone()))
+            .unwrap_or_else(|| prompt_flag.clone());
+
+        let plan_output_format = env::var("AGENTD_CLI_PLAN_OUTPUT_FORMAT")
+            .ok()
+            .or_else(|| file_cli.and_then(|c| c.plan_output_format.clone()))
+            .unwrap_or_else(|| "yaml".to_string());
+
         let endpoint = env::var("AGENTD_HTTP_ENDPOINT")
             .ok()
             .or_else(|| file_http.and_then(|h| h.endpoint.clone()))
@@ -131,6 +170,11 @@ impl AppConfig {
                 prompt_mode,
                 prompt_flag,
                 runtime_dir,
+                plan_command,
+                plan_args,
+                plan_goal_mode,
+                plan_goal_flag,
+                plan_output_format,
             },
             http: HttpProviderConfig {
                 endpoint,

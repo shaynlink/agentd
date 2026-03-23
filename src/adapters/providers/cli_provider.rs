@@ -42,6 +42,21 @@ impl PromptMode {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum PlanOutputFormat {
+    Yaml,
+    Json,
+}
+
+impl PlanOutputFormat {
+    fn from_value(value: &str) -> Self {
+        match value {
+            v if v.eq_ignore_ascii_case("json") => Self::Json,
+            _ => Self::Yaml,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct CliProviderConfig {
     command: String,
@@ -49,6 +64,11 @@ struct CliProviderConfig {
     prompt_mode: PromptMode,
     prompt_flag: String,
     runtime_dir: PathBuf,
+    plan_command: String,
+    plan_args: Vec<String>,
+    plan_goal_mode: PromptMode,
+    plan_goal_flag: String,
+    plan_output_format: PlanOutputFormat,
 }
 
 impl CliProviderConfig {
@@ -62,6 +82,11 @@ impl CliProviderConfig {
             prompt_mode: PromptMode::from_value(&cli_cfg.prompt_mode),
             prompt_flag: cli_cfg.prompt_flag,
             runtime_dir: cli_cfg.runtime_dir,
+            plan_command: cli_cfg.plan_command,
+            plan_args: cli_cfg.plan_args,
+            plan_goal_mode: PromptMode::from_value(&cli_cfg.plan_goal_mode),
+            plan_goal_flag: cli_cfg.plan_goal_flag,
+            plan_output_format: PlanOutputFormat::from_value(&cli_cfg.plan_output_format),
         })
     }
 
@@ -91,6 +116,81 @@ fn read_pid(path: &Path) -> Result<i32> {
         .parse::<i32>()
         .with_context(|| format!("invalid pid in file: {}", path.display()))?;
     Ok(pid)
+}
+
+async fn run_cli_capture_output(
+    command_name: &str,
+    args: &[String],
+    input_mode: PromptMode,
+    input_flag: &str,
+    input_value: &str,
+    context_name: &str,
+) -> Result<String> {
+    let mut command = Command::new(command_name);
+    command.args(args);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+    match input_mode {
+        PromptMode::Stdin => {
+            command.stdin(Stdio::piped());
+        }
+        PromptMode::Arg => {
+            command.stdin(Stdio::null());
+            command.arg(input_flag).arg(input_value);
+        }
+    }
+
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("failed to spawn {context_name} CLI command: {command_name}"))?;
+
+    if matches!(input_mode, PromptMode::Stdin)
+        && let Some(mut stdin) = child.stdin.take()
+    {
+        stdin
+            .write_all(input_value.as_bytes())
+            .await
+            .with_context(|| format!("failed to send input to {context_name} CLI stdin"))?;
+        stdin
+            .write_all(b"\n")
+            .await
+            .with_context(|| format!("failed to terminate input for {context_name} CLI stdin"))?;
+        stdin
+            .shutdown()
+            .await
+            .with_context(|| format!("failed to close {context_name} CLI stdin"))?;
+    }
+
+    let output = child.wait_with_output().await.with_context(|| {
+        format!("failed waiting for {context_name} CLI process: {command_name}")
+    })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+    if output.status.success() {
+        if !stdout.is_empty() {
+            return Ok(stdout);
+        }
+        if !stderr.is_empty() {
+            return Ok(stderr);
+        }
+        bail!("{context_name} CLI command returned empty output");
+    }
+
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        "no process output".to_string()
+    };
+
+    bail!(
+        "{context_name} CLI command failed with status {}: {}",
+        output.status,
+        detail
+    )
 }
 
 async fn send_kill_signal(pid: i32, signal: &str) -> Result<bool> {
@@ -128,8 +228,26 @@ impl Provider for CliProvider {
         "cli"
     }
 
-    async fn generate_plan(&self, _goal: &str) -> Result<Plan> {
-        bail!("cli provider does not implement plan generation yet")
+    async fn generate_plan(&self, goal: &str) -> Result<Plan> {
+        let cfg = CliProviderConfig::load()?;
+        let raw = run_cli_capture_output(
+            &cfg.plan_command,
+            &cfg.plan_args,
+            cfg.plan_goal_mode,
+            &cfg.plan_goal_flag,
+            goal,
+            "plan generation",
+        )
+        .await?;
+
+        let plan = match cfg.plan_output_format {
+            PlanOutputFormat::Yaml => serde_yaml::from_str::<Plan>(&raw)
+                .context("failed to parse YAML plan from CLI provider")?,
+            PlanOutputFormat::Json => serde_json::from_str::<Plan>(&raw)
+                .context("failed to parse JSON plan from CLI provider")?,
+        };
+
+        Ok(plan)
     }
 
     async fn run_agent(&self, request: ProviderRunRequest) -> Result<ProviderRunResult> {

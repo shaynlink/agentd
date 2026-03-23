@@ -11,6 +11,7 @@ pub fn build_provider(name: &str) -> Result<Box<dyn Provider>> {
         "mock" => Ok(Box::new(mock::MockProvider::new())),
         "http" => Ok(Box::new(http_provider::HttpProvider::new())),
         "cli" => Ok(Box::new(cli_provider::CliProvider::new())),
-        other => bail!("unknown provider: {other}. expected one of: mock|http|cli"),
+        "vibe" => Ok(Box::new(cli_provider::CliProvider::new())),
+        other => bail!("unknown provider: {other}. expected one of: mock|http|cli|vibe"),
     }
 }

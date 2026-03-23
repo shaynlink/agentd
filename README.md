@@ -34,8 +34,9 @@ Core capabilities:
 | Area | Status |
 | --- | --- |
 | Provider `mock` | Implemented |
-| Provider `cli` | Implemented for agent execution (`run_agent`) |
+| Provider `cli` | Implemented for agent execution and plan generation |
 | Provider `http` | Implemented for agent execution (`run_agent`) |
+| Provider `vibe` | Alias to `cli` provider |
 | Persistence | SQLite (`./.agentd/state.db` by default) |
 
 ## Prerequisites
@@ -129,7 +130,6 @@ Notes:
 - `schedule-cron --cron` expects a cron expression (seconds precision).
 - `schedule-dispatch-due` executes schedules where state is `scheduled` and `run_at <= now`.
 - recurring cron schedules are automatically re-planned to their next run after dispatch.
-- `cli` does not implement `plan-generate` yet.
 - `http` does not implement `plan-generate` yet.
 - restart recovery is automatic at startup: stale `running` agents are moved back to `pending`.
 - duplicate concurrent executions of the same agent are prevented by an execution lock.
@@ -145,6 +145,11 @@ The `cli` provider reads environment variables:
 | `AGENTD_CLI_PROMPT_MODE` | `stdin` | Prompt transport mode: `stdin` or `arg` |
 | `AGENTD_CLI_PROMPT_FLAG` | `--prompt` | Flag name used when mode is `arg` |
 | `AGENTD_CLI_RUNTIME_DIR` | `./.agentd/runtime` | PID file directory used for cancellation |
+| `AGENTD_CLI_PLAN_COMMAND` | value of `AGENTD_CLI_COMMAND` | Executable used for `plan-generate` |
+| `AGENTD_CLI_PLAN_ARGS_JSON` | value of `AGENTD_CLI_ARGS_JSON` | JSON array of args used for `plan-generate` |
+| `AGENTD_CLI_PLAN_GOAL_MODE` | value of `AGENTD_CLI_PROMPT_MODE` | Goal transport mode for `plan-generate`: `stdin` or `arg` |
+| `AGENTD_CLI_PLAN_GOAL_FLAG` | value of `AGENTD_CLI_PROMPT_FLAG` | Flag name used when `AGENTD_CLI_PLAN_GOAL_MODE=arg` |
+| `AGENTD_CLI_PLAN_OUTPUT_FORMAT` | `yaml` | Output format returned by planner CLI: `yaml` or `json` |
 
 Example (`stdin` mode):
 
@@ -160,6 +165,17 @@ AGENTD_CLI_ARGS_JSON='["run"]' \
 AGENTD_CLI_PROMPT_MODE=arg \
 AGENTD_CLI_PROMPT_FLAG=--prompt \
 cargo run -- attach --id <AGENT_ID>
+```
+
+Example (`plan-generate` with a dedicated CLI command):
+
+```bash
+AGENTD_CLI_PLAN_COMMAND=vibe \
+AGENTD_CLI_PLAN_ARGS_JSON='["plan","generate"]' \
+AGENTD_CLI_PLAN_GOAL_MODE=arg \
+AGENTD_CLI_PLAN_GOAL_FLAG=--goal \
+AGENTD_CLI_PLAN_OUTPUT_FORMAT=yaml \
+cargo run -- plan-generate --provider vibe --goal "Préparer un rapport" --output ./plan.yaml
 ```
 
 ### HTTP Provider Configuration
@@ -244,7 +260,7 @@ State transitions are enforced:
 
 ## Known Limitations
 
-- `plan-generate` is only implemented by `mock` right now.
+- `plan-generate` is implemented by `mock` and `cli` (`vibe` alias).
 - scheduler is implemented, but there is no always-on daemon loop in this MVP.
 
 Scheduler status:

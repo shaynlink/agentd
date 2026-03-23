@@ -6,6 +6,11 @@ args = []
 prompt_mode = "stdin"
 prompt_flag = "--prompt"
 runtime_dir = "./.agentd/runtime"
+plan_command = "cat"
+plan_args = []
+plan_goal_mode = "stdin"
+plan_goal_flag = "--goal"
+plan_output_format = "yaml"
 
 [providers.http]
 endpoint = "http://localhost:8080/run-agent"

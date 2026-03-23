@@ -78,6 +78,27 @@ async fn run_stream_case(json_lines: bool) -> String {
     result.output
 }
 
+async fn generate_plan_case(plan_output_format: &str, goal: &str) -> String {
+    let _lock = ENV_LOCK.lock().expect("lock test env");
+    let _env = EnvGuard::set(&[
+        ("AGENTD_CLI_PLAN_COMMAND", "/bin/sh".to_string()),
+        ("AGENTD_CLI_PLAN_ARGS_JSON", "[\"-c\",\"cat\"]".to_string()),
+        ("AGENTD_CLI_PLAN_GOAL_MODE", "stdin".to_string()),
+        (
+            "AGENTD_CLI_PLAN_OUTPUT_FORMAT",
+            plan_output_format.to_string(),
+        ),
+        ("AGENTD_CLI_RUNTIME_DIR", temp_runtime_dir()),
+    ]);
+
+    let provider = CliProvider::new();
+    let plan = provider
+        .generate_plan(goal)
+        .await
+        .expect("generate plan from cli provider");
+    serde_yaml::to_string(&plan).expect("serialize generated plan")
+}
+
 #[tokio::test]
 async fn cli_provider_stream_text_mode_returns_combined_output() {
     let output = run_stream_case(false).await;
@@ -102,4 +123,32 @@ async fn cli_provider_stream_json_lines_mode_returns_combined_output() {
         output.contains("line-err"),
         "stderr line should be present in output: {output}"
     );
+}
+
+#[tokio::test]
+async fn cli_provider_generate_plan_from_yaml_output() {
+    let plan_yaml = r#"name: plan-yaml
+steps:
+  - id: step-1
+    name: Analyze
+    prompt: Do it
+"#;
+    let output = generate_plan_case("yaml", plan_yaml).await;
+    assert!(
+        output.contains("name: plan-yaml"),
+        "unexpected output: {output}"
+    );
+    assert!(output.contains("id: step-1"), "unexpected output: {output}");
+}
+
+#[tokio::test]
+async fn cli_provider_generate_plan_from_json_output() {
+    let plan_json =
+        r#"{"name":"plan-json","steps":[{"id":"step-1","name":"Analyze","prompt":"Do it"}]}"#;
+    let output = generate_plan_case("json", plan_json).await;
+    assert!(
+        output.contains("name: plan-json"),
+        "unexpected output: {output}"
+    );
+    assert!(output.contains("id: step-1"), "unexpected output: {output}");
 }
