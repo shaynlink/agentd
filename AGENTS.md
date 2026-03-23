@@ -123,6 +123,7 @@ Load the appropriate **role** from `.agent/roles/` and the relevant **context ma
 > Add your roles in `.agent/roles/`. See the README for the role file format.
 
 - `rust-orchestrator.md` — default role for Rust architecture, ports/adapters, and provider execution paths.
+- `technical-documentation-writer.md` — writes clear, structured, and easy-to-follow technical documentation.
 
 ---
 
@@ -135,6 +136,7 @@ Load the appropriate **role** from `.agent/roles/` and the relevant **context ma
 | "sqlite", "migration", "store", "state" | `01-rust-and-cli-standards.md` | `rust-orchestrator.md` | `codebase-overview.md#persistence-layer` |
 | "commande cli", "clap", "subcommand" | `01-rust-and-cli-standards.md` | `rust-orchestrator.md` | `codebase-overview.md#cli-surface` |
 | "plan", "run-plan", "plan-generate" | `01-rust-and-cli-standards.md` | `rust-orchestrator.md` | `codebase-overview.md#application-flow` |
+| "documentation", "README", "guide", "how-to", "tutoriel" | `02-technical-documentation-standards.md` | `technical-documentation-writer.md` | `codebase-overview.md#cli-surface` |
 
 ---
 
