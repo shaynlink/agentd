@@ -150,7 +150,7 @@ This document lists the next milestones required to evolve the current MVP into 
 - [x] Add initial Tier-1 Rust skill (`.agent/rules/tier-1/01-rust-and-cli-standards.md`)
 - [x] Add default role (`.agent/roles/rust-orchestrator.md`)
 - [x] Add semantic memory map (`.agent/memory/semantic/codebase-overview.md`)
-- [ ] Add project-specific Tier-2 domain skills (execution policy, retry strategy, plan safety)
-- [ ] Add semantic maps for `domain-models`, `provider-contracts`, `sqlite-schema`
-- [ ] Add episodic memory format for postmortems/RCA after failed runs
-- [ ] Expand Task Detection Table with concrete signal patterns from real tickets
+- [x] Add project-specific Tier-2 domain skills (execution policy, retry strategy, plan safety)
+- [x] Add semantic maps for `domain-models`, `provider-contracts`, `sqlite-schema`
+- [x] Add episodic memory format for postmortems/RCA after failed runs
+- [x] Expand Task Detection Table with concrete signal patterns from real tickets

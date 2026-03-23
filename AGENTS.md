@@ -136,6 +136,11 @@ Load the appropriate **role** from `.agent/roles/` and the relevant **context ma
 | "sqlite", "migration", "store", "state" | `01-rust-and-cli-standards.md` | `rust-orchestrator.md` | `codebase-overview.md#persistence-layer` |
 | "commande cli", "clap", "subcommand" | `01-rust-and-cli-standards.md` | `rust-orchestrator.md` | `codebase-overview.md#cli-surface` |
 | "plan", "run-plan", "plan-generate" | `01-rust-and-cli-standards.md` | `rust-orchestrator.md` | `codebase-overview.md#application-flow` |
+| "retry", "timeout", "attempts", "timed_out" | `21-retry-timeout-strategy.md` | `rust-orchestrator.md` | `provider-contracts.md#provider-port` |
+| "execution lock", "duplicate attach", "idempotence" | `20-execution-policy.md` | `rust-orchestrator.md` | `sqlite-schema.md#execution-locks` |
+| "schedule", "cron", "dispatch-due", "run-at" | `20-execution-policy.md` | `rust-orchestrator.md` | `domain-models.md#schedule-entity` |
+| "plan safety", "yaml/json parse", "step defaults" | `22-plan-safety.md` | `rust-orchestrator.md` | `domain-models.md#plan-entity` |
+| "observability", "structured logs", "error categories" | `20-execution-policy.md` | `rust-orchestrator.md` | `sqlite-schema.md#agents-and-logs` |
 | "documentation", "README", "guide", "how-to", "tutoriel" | `02-technical-documentation-standards.md` | `technical-documentation-writer.md` | `codebase-overview.md#cli-surface` |
 
 ---
