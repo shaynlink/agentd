@@ -94,6 +94,10 @@ This document lists the next milestones required to evolve the current MVP into 
     - retries/timeouts
     - core CLI flows
     - mock/stub providers
+  - Progress:
+    - state transition enforcement tests added
+    - restart recovery/lock release tests added
+    - scheduler dispatch (run-at) integration test added
 
 - [ ] Improve error handling and observability
   - clearer error categories
