@@ -46,7 +46,7 @@ This document lists the next milestones required to evolve the current MVP into 
 
 ## Priority P1 (Runtime Stabilization)
 
-- [ ] Add `run-at` and `cron` scheduler
+- [x] Add `run-at` and `cron` scheduler
   - Proposed new modules:
     - `src/scheduler/mod.rs`
     - `src/scheduler/engine.rs`
@@ -57,9 +57,9 @@ This document lists the next milestones required to evolve the current MVP into 
     - schedule command creates and triggers planned runs
   - Progress:
     - `schedule-run-at` implemented
+    - `schedule-cron` implemented
     - `schedule-list` implemented
     - `schedule-dispatch-due` implemented
-    - cron expression support still pending
 
 - [ ] Add restart recovery
   - Extend SQLite schema to store in-progress execution

@@ -43,6 +43,7 @@ pub struct ScheduleRecord {
     pub name: String,
     pub provider: String,
     pub prompt: String,
+    pub cron_expr: Option<String>,
     pub run_at: DateTime<Utc>,
     pub timeout_secs: u64,
     pub retries: u32,

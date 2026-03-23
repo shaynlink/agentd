@@ -1,8 +1,10 @@
 use std::path::Path;
+use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
+use cron::Schedule;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -225,6 +227,7 @@ impl App {
             name: name.to_string(),
             provider: provider.to_string(),
             prompt: prompt.to_string(),
+            cron_expr: None,
             run_at,
             timeout_secs,
             retries,
@@ -242,6 +245,46 @@ impl App {
         Ok(())
     }
 
+    pub fn schedule_cron(
+        &self,
+        name: &str,
+        provider: &str,
+        prompt: &str,
+        cron_expr: &str,
+        timeout_secs: u64,
+        retries: u32,
+    ) -> Result<()> {
+        let schedule = Schedule::from_str(cron_expr)
+            .with_context(|| format!("invalid cron expression: {cron_expr}"))?;
+        let next_run = schedule
+            .upcoming(Utc)
+            .next()
+            .context("cron expression does not produce a next run")?;
+
+        let now = Utc::now();
+        let record = ScheduleRecord {
+            id: Uuid::new_v4().to_string(),
+            name: name.to_string(),
+            provider: provider.to_string(),
+            prompt: prompt.to_string(),
+            cron_expr: Some(cron_expr.to_string()),
+            run_at: next_run,
+            timeout_secs,
+            retries,
+            state: ScheduleState::Scheduled,
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.store.create_schedule(&record)?;
+        println!(
+            "scheduled cron '{}' next run at {} (provider={})",
+            record.name, record.run_at, record.provider
+        );
+        println!("schedule_id={}", record.id);
+        Ok(())
+    }
+
     pub fn list_schedules(&self, limit: usize) -> Result<()> {
         let schedules = self.store.list_schedules(limit)?;
         if schedules.is_empty() {
@@ -250,12 +293,18 @@ impl App {
         }
 
         for s in schedules {
+            let mode = s
+                .cron_expr
+                .as_ref()
+                .map(|expr| format!("cron={expr}"))
+                .unwrap_or_else(|| "run-at".to_string());
             println!(
-                "{} | {} | {} | {} | run_at={} | timeout={}s | retries={}",
+                "{} | {} | {} | {} | {} | run_at={} | timeout={}s | retries={}",
                 s.id,
                 s.name,
                 s.provider,
                 s.state.as_str(),
+                mode,
                 s.run_at,
                 s.timeout_secs,
                 s.retries
@@ -295,8 +344,22 @@ impl App {
                         "succeeded",
                         None,
                     )?;
-                    self.store
-                        .update_schedule_state(&schedule.id, ScheduleState::Succeeded)?;
+                    if let Some(expr) = schedule.cron_expr.as_deref() {
+                        let cron = Schedule::from_str(expr).with_context(|| {
+                            format!("invalid cron expression in schedule {}", schedule.id)
+                        })?;
+                        let next_run = cron
+                            .after(&schedule.run_at)
+                            .next()
+                            .context("cron expression does not produce a subsequent run")?;
+                        self.store
+                            .update_schedule_run_at(&schedule.id, &next_run.to_rfc3339())?;
+                        self.store
+                            .update_schedule_state(&schedule.id, ScheduleState::Scheduled)?;
+                    } else {
+                        self.store
+                            .update_schedule_state(&schedule.id, ScheduleState::Succeeded)?;
+                    }
                     println!("schedule {} succeeded (agent_id={})", schedule.id, agent_id);
                 }
                 Err(err) => {
@@ -307,8 +370,22 @@ impl App {
                         "failed",
                         Some(&error_text),
                     )?;
-                    self.store
-                        .update_schedule_state(&schedule.id, ScheduleState::Failed)?;
+                    if let Some(expr) = schedule.cron_expr.as_deref() {
+                        let cron = Schedule::from_str(expr).with_context(|| {
+                            format!("invalid cron expression in schedule {}", schedule.id)
+                        })?;
+                        let next_run = cron
+                            .after(&schedule.run_at)
+                            .next()
+                            .context("cron expression does not produce a subsequent run")?;
+                        self.store
+                            .update_schedule_run_at(&schedule.id, &next_run.to_rfc3339())?;
+                        self.store
+                            .update_schedule_state(&schedule.id, ScheduleState::Scheduled)?;
+                    } else {
+                        self.store
+                            .update_schedule_state(&schedule.id, ScheduleState::Failed)?;
+                    }
                     println!("schedule {} failed: {}", schedule.id, error_text);
                 }
             }

@@ -105,6 +105,21 @@ enum Commands {
         #[arg(long, default_value_t = 0)]
         retries: u32,
     },
+    /// Create a recurring schedule from a cron expression
+    ScheduleCron {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        prompt: String,
+        #[arg(long)]
+        cron: String,
+        #[arg(long)]
+        provider: Option<String>,
+        #[arg(long, default_value_t = 60)]
+        timeout_secs: u64,
+        #[arg(long, default_value_t = 0)]
+        retries: u32,
+    },
     /// List schedules
     ScheduleList {
         #[arg(long, default_value_t = 100)]
@@ -173,6 +188,17 @@ pub async fn run() -> Result<()> {
             app.schedule_run_at(&name, &provider, &prompt, run_at, timeout_secs, retries)
         }
         Commands::ScheduleList { limit } => app.list_schedules(limit),
+        Commands::ScheduleCron {
+            name,
+            prompt,
+            cron,
+            provider,
+            timeout_secs,
+            retries,
+        } => {
+            let provider = provider.unwrap_or_else(|| default_provider.clone());
+            app.schedule_cron(&name, &provider, &prompt, &cron, timeout_secs, retries)
+        }
         Commands::ScheduleDispatchDue { limit } => app.dispatch_due_schedules(limit).await,
     }
 }

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, Error as RusqliteError, params};
 
 use crate::domain::agent::{AgentLog, AgentRecord, AgentState};
 use crate::domain::schedule::{ScheduleRecord, ScheduleRun, ScheduleState};
@@ -64,6 +64,7 @@ impl StateStore for SqliteStore {
                 name TEXT NOT NULL,
                 provider TEXT NOT NULL,
                 prompt TEXT NOT NULL,
+                cron_expr TEXT,
                 run_at TEXT NOT NULL,
                 timeout_secs INTEGER NOT NULL,
                 retries INTEGER NOT NULL,
@@ -91,6 +92,7 @@ impl StateStore for SqliteStore {
             "#,
         )
         .context("failed to initialize sqlite schema")?;
+
         Ok(())
     }
 
@@ -226,13 +228,14 @@ impl StateStore for SqliteStore {
     fn create_schedule(&self, schedule: &ScheduleRecord) -> Result<()> {
         let conn = self.open()?;
         conn.execute(
-            "INSERT INTO schedules (id, name, provider, prompt, run_at, timeout_secs, retries, state, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO schedules (id, name, provider, prompt, cron_expr, run_at, timeout_secs, retries, state, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 schedule.id,
                 schedule.name,
                 schedule.provider,
                 schedule.prompt,
+                schedule.cron_expr,
                 schedule.run_at.to_rfc3339(),
                 schedule.timeout_secs as i64,
                 schedule.retries as i64,
@@ -248,23 +251,24 @@ impl StateStore for SqliteStore {
     fn list_schedules(&self, limit: usize) -> Result<Vec<ScheduleRecord>> {
         let conn = self.open()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, provider, prompt, run_at, timeout_secs, retries, state, created_at, updated_at
+            "SELECT id, name, provider, prompt, cron_expr, run_at, timeout_secs, retries, state, created_at, updated_at
              FROM schedules ORDER BY run_at ASC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], |row| {
-            let run_at: String = row.get(4)?;
-            let state: String = row.get(7)?;
-            let created_at: String = row.get(8)?;
-            let updated_at: String = row.get(9)?;
+            let run_at: String = row.get(5)?;
+            let state: String = row.get(8)?;
+            let created_at: String = row.get(9)?;
+            let updated_at: String = row.get(10)?;
 
             Ok(ScheduleRecord {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 provider: row.get(2)?,
                 prompt: row.get(3)?,
+                cron_expr: row.get(4)?,
                 run_at: parse_ts(&run_at).unwrap_or_else(|_| Utc::now()),
-                timeout_secs: row.get::<_, i64>(5)? as u64,
-                retries: row.get::<_, i64>(6)? as u32,
+                timeout_secs: row.get::<_, i64>(6)? as u64,
+                retries: row.get::<_, i64>(7)? as u32,
                 state: state.parse().unwrap_or(ScheduleState::Failed),
                 created_at: parse_ts(&created_at).unwrap_or_else(|_| Utc::now()),
                 updated_at: parse_ts(&updated_at).unwrap_or_else(|_| Utc::now()),
@@ -281,7 +285,7 @@ impl StateStore for SqliteStore {
     fn list_due_schedules(&self, now_rfc3339: &str, limit: usize) -> Result<Vec<ScheduleRecord>> {
         let conn = self.open()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, provider, prompt, run_at, timeout_secs, retries, state, created_at, updated_at
+            "SELECT id, name, provider, prompt, cron_expr, run_at, timeout_secs, retries, state, created_at, updated_at
              FROM schedules
              WHERE state = 'scheduled' AND run_at <= ?1
              ORDER BY run_at ASC
@@ -289,19 +293,20 @@ impl StateStore for SqliteStore {
         )?;
 
         let rows = stmt.query_map(params![now_rfc3339, limit as i64], |row| {
-            let run_at: String = row.get(4)?;
-            let state: String = row.get(7)?;
-            let created_at: String = row.get(8)?;
-            let updated_at: String = row.get(9)?;
+            let run_at: String = row.get(5)?;
+            let state: String = row.get(8)?;
+            let created_at: String = row.get(9)?;
+            let updated_at: String = row.get(10)?;
 
             Ok(ScheduleRecord {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 provider: row.get(2)?,
                 prompt: row.get(3)?,
+                cron_expr: row.get(4)?,
                 run_at: parse_ts(&run_at).unwrap_or_else(|_| Utc::now()),
-                timeout_secs: row.get::<_, i64>(5)? as u64,
-                retries: row.get::<_, i64>(6)? as u32,
+                timeout_secs: row.get::<_, i64>(6)? as u64,
+                retries: row.get::<_, i64>(7)? as u32,
                 state: state.parse().unwrap_or(ScheduleState::Failed),
                 created_at: parse_ts(&created_at).unwrap_or_else(|_| Utc::now()),
                 updated_at: parse_ts(&updated_at).unwrap_or_else(|_| Utc::now()),
@@ -322,6 +327,16 @@ impl StateStore for SqliteStore {
             params![state.as_str(), Utc::now().to_rfc3339(), schedule_id],
         )
         .with_context(|| format!("failed to update schedule state: {schedule_id}"))?;
+        Ok(())
+    }
+
+    fn update_schedule_run_at(&self, schedule_id: &str, run_at_rfc3339: &str) -> Result<()> {
+        let conn = self.open()?;
+        conn.execute(
+            "UPDATE schedules SET run_at = ?1, updated_at = ?2 WHERE id = ?3",
+            params![run_at_rfc3339, Utc::now().to_rfc3339(), schedule_id],
+        )
+        .with_context(|| format!("failed to update schedule run_at: {schedule_id}"))?;
         Ok(())
     }
 

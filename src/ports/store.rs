@@ -17,6 +17,7 @@ pub trait StateStore {
     fn list_schedules(&self, limit: usize) -> Result<Vec<ScheduleRecord>>;
     fn list_due_schedules(&self, now_rfc3339: &str, limit: usize) -> Result<Vec<ScheduleRecord>>;
     fn update_schedule_state(&self, schedule_id: &str, state: ScheduleState) -> Result<()>;
+    fn update_schedule_run_at(&self, schedule_id: &str, run_at_rfc3339: &str) -> Result<()>;
     fn append_schedule_run(
         &self,
         schedule_id: &str,

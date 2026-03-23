@@ -113,6 +113,7 @@ Precedence order:
 | `resume` | Set agent state to running | `cargo run -- resume --id <AGENT_ID>` |
 | `stop` | Cancel an agent | `cargo run -- stop --id <AGENT_ID>` |
 | `schedule-run-at` | Create one-shot schedule at a datetime | `cargo run -- schedule-run-at --name "nightly" --prompt "Run checks" --run-at "2026-03-24T23:00:00Z"` |
+| `schedule-cron` | Create recurring schedule from cron expression | `cargo run -- schedule-cron --name "hourly" --prompt "Run checks" --cron "0 0 * * * * *"` |
 | `schedule-list` | List schedules | `cargo run -- schedule-list --limit 100` |
 | `schedule-dispatch-due` | Execute due schedules | `cargo run -- schedule-dispatch-due --limit 50` |
 
@@ -123,7 +124,9 @@ Notes:
   If omitted, `default_provider` from config is used.
 - `run-plan` accepts YAML by default; JSON is used when file extension is `.json`.
 - `schedule-run-at --run-at` expects an RFC3339 datetime (UTC recommended).
+- `schedule-cron --cron` expects a cron expression (seconds precision).
 - `schedule-dispatch-due` executes schedules where state is `scheduled` and `run_at <= now`.
+- recurring cron schedules are automatically re-planned to their next run after dispatch.
 - `cli` does not implement `plan-generate` yet.
 - `http` does not implement `plan-generate` yet.
 
@@ -239,7 +242,7 @@ Scheduler status:
 
 - one-shot scheduling (`schedule-run-at`) is implemented
 - due dispatch (`schedule-dispatch-due`) is implemented
-- cron expressions are not implemented yet
+- cron scheduling (`schedule-cron`) is implemented
 
 ## Troubleshooting
 
