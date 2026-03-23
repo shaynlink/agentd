@@ -1,0 +1,105 @@
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use agentd::adapters::providers::cli_provider::CliProvider;
+use agentd::ports::provider::{Provider, ProviderRunRequest};
+use uuid::Uuid;
+
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn temp_runtime_dir() -> String {
+    let mut path = PathBuf::from(std::env::temp_dir());
+    path.push(format!("agentd-runtime-{}", Uuid::new_v4()));
+    path.to_string_lossy().to_string()
+}
+
+struct EnvGuard {
+    entries: Vec<(String, Option<String>)>,
+}
+
+impl EnvGuard {
+    fn set(entries: &[(&str, String)]) -> Self {
+        let mut saved = Vec::with_capacity(entries.len());
+        for (key, value) in entries {
+            let key_string = (*key).to_string();
+            let previous = std::env::var(key).ok();
+            // Tests run under a global lock to avoid concurrent env access.
+            unsafe {
+                std::env::set_var(&key_string, value);
+            }
+            saved.push((key_string, previous));
+        }
+        Self { entries: saved }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        for (key, previous) in &self.entries {
+            match previous {
+                Some(value) => {
+                    // Restores prior process env after each test.
+                    unsafe {
+                        std::env::set_var(key, value);
+                    }
+                }
+                None => {
+                    // Removes keys that were not originally present.
+                    unsafe {
+                        std::env::remove_var(key);
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn run_stream_case(json_lines: bool) -> String {
+    let _lock = ENV_LOCK.lock().expect("lock test env");
+    let _env = EnvGuard::set(&[
+        ("AGENTD_CLI_COMMAND", "/bin/sh".to_string()),
+        (
+            "AGENTD_CLI_ARGS_JSON",
+            "[\"-c\",\"printf 'line-out\\n'; printf 'line-err\\n' >&2\"]".to_string(),
+        ),
+        ("AGENTD_CLI_RUNTIME_DIR", temp_runtime_dir()),
+    ]);
+
+    let provider = CliProvider::new();
+    let req = ProviderRunRequest {
+        agent_id: Uuid::new_v4().to_string(),
+        prompt: "ignored".to_string(),
+        timeout_secs: 5,
+        stream_output: true,
+        json_lines,
+    };
+
+    let result = provider.run_agent(req).await.expect("run stream case");
+    result.output
+}
+
+#[tokio::test]
+async fn cli_provider_stream_text_mode_returns_combined_output() {
+    let output = run_stream_case(false).await;
+    assert!(
+        output.contains("line-out"),
+        "stdout line should be present in output: {output}"
+    );
+    assert!(
+        output.contains("line-err"),
+        "stderr line should be present in output: {output}"
+    );
+}
+
+#[tokio::test]
+async fn cli_provider_stream_json_lines_mode_returns_combined_output() {
+    let output = run_stream_case(true).await;
+    assert!(
+        output.contains("line-out"),
+        "stdout line should be present in output: {output}"
+    );
+    assert!(
+        output.contains("line-err"),
+        "stderr line should be present in output: {output}"
+    );
+}
