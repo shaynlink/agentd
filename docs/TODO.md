@@ -115,6 +115,8 @@ This document lists the next milestones required to evolve the current MVP into 
     - app lifecycle and attach logs now use structured JSON payloads
     - explicit error categories added (`provider_error`, `timeout`, `recovery`, `state_change`)
     - integration tests now assert structured log fields for provider errors and timeouts
+    - CLI stderr errors now emit structured JSON with category/message/causes
+    - CLI integration tests added for `not_found` and `validation` error categories
 
 - [ ] Add end-user documentation
   - add `README.md` with:
