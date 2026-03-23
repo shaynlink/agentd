@@ -95,6 +95,9 @@ This document lists the next milestones required to evolve the current MVP into 
     - core CLI flows
     - mock/stub providers
   - Progress:
+    - core CLI flow integration test (spawn/status/attach/logs/list) added
+    - run_plan YAML parsing integration test added
+    - run_plan JSON parsing integration test added
     - state transition enforcement tests added
     - pause/resume transition rule tests added
     - restart recovery/lock release tests added
