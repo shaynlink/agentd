@@ -34,7 +34,7 @@ Core capabilities:
 | --- | --- |
 | Provider `mock` | Implemented |
 | Provider `cli` | Implemented for agent execution (`run_agent`) |
-| Provider `http` | Stub |
+| Provider `http` | Implemented for agent execution (`run_agent`) |
 | Persistence | SQLite (`./.agentd/state.db` by default) |
 
 ## Prerequisites
@@ -87,8 +87,8 @@ Notes:
 
 - `spawn` only creates the record. It does not run execution.
 - `run-plan` accepts YAML by default; JSON is used when file extension is `.json`.
-- `http` is still a stub.
 - `cli` does not implement `plan-generate` yet.
+- `http` does not implement `plan-generate` yet.
 
 ### CLI Provider Configuration
 
@@ -117,6 +117,35 @@ AGENTD_CLI_PROMPT_MODE=arg \
 AGENTD_CLI_PROMPT_FLAG=--prompt \
 cargo run -- attach --id <AGENT_ID>
 ```
+
+### HTTP Provider Configuration
+
+The `http` provider reads environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AGENTD_HTTP_ENDPOINT` | `http://localhost:8080/run-agent` | Target endpoint for `run_agent` |
+| `AGENTD_HTTP_AUTH_MODE` | `none` | Auth mode: `none`, `bearer`, or `api-key` |
+| `AGENTD_HTTP_BEARER_TOKEN` | unset | Bearer token when mode is `bearer` |
+| `AGENTD_HTTP_API_KEY` | unset | API key when mode is `api-key` |
+| `AGENTD_HTTP_API_KEY_HEADER` | `x-api-key` | Header name for API key mode |
+
+Request payload sent by `http` provider:
+
+```json
+{
+  "agent_id": "<AGENT_ID>",
+  "prompt": "<PROMPT>",
+  "timeout_secs": 60
+}
+```
+
+Accepted response formats:
+
+- JSON with `output`
+- JSON with `result.output`
+- JSON with `data.output`
+- plain text body (fallback)
 
 ## Plan File Format
 
@@ -167,7 +196,6 @@ Possible states:
 ## Known Limitations
 
 - `plan-generate` is only implemented by `mock` right now.
-- `http` provider is not implemented.
 - Scheduler and restart-recovery are not implemented yet.
 
 ## Troubleshooting

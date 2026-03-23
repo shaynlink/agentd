@@ -8,7 +8,8 @@ This document lists the next milestones required to evolve the current MVP into 
 - Ports/adapters architecture is in place
 - SQLite persistence is in place (agents + logs)
 - `mock` provider is operational
-- `http` and `cli` providers are still stubs
+- `cli` provider is operational for execution (`run_agent`)
+- `http` provider is operational for execution (`run_agent`)
 
 ## Priority P0 (Do First)
 
@@ -22,7 +23,7 @@ This document lists the next milestones required to evolve the current MVP into 
   - Acceptance criteria:
     - `--provider cli` executes a real agent
 
-- [ ] Implement concrete HTTP provider
+- [x] Implement concrete HTTP provider
   - Target file: `src/adapters/providers/http_provider.rs`
   - Minimum support:
     - configurable endpoint
