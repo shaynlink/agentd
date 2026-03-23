@@ -96,8 +96,12 @@ This document lists the next milestones required to evolve the current MVP into 
     - mock/stub providers
   - Progress:
     - state transition enforcement tests added
+    - pause/resume transition rule tests added
     - restart recovery/lock release tests added
+    - attach retries on provider error integration test added
+    - attach timeout retries integration test added
     - scheduler dispatch (run-at) integration test added
+    - scheduler cron replan integration test added
 
 - [ ] Improve error handling and observability
   - clearer error categories

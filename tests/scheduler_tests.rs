@@ -31,3 +31,45 @@ async fn dispatch_due_run_at_schedule_executes_once() {
     assert_eq!(schedules.len(), 1, "expected one schedule");
     assert_eq!(schedules[0].state, ScheduleState::Succeeded);
 }
+
+#[tokio::test]
+async fn dispatch_due_cron_schedule_replans_next_run() {
+    let db_path = temp_db_path();
+    let app = App::new(db_path.clone()).expect("create app");
+
+    app.schedule_cron(
+        "hourly",
+        "mock",
+        "do recurring work",
+        "0 0 * * * * *",
+        10,
+        0,
+    )
+    .expect("create cron schedule");
+
+    let store = SqliteStore::new(db_path.clone());
+    let before = store
+        .list_schedules(10)
+        .expect("list schedules before dispatch");
+    assert_eq!(before.len(), 1, "expected one schedule");
+
+    let schedule_id = before[0].id.clone();
+    let forced_due = Utc::now() - Duration::seconds(2);
+    store
+        .update_schedule_run_at(&schedule_id, &forced_due.to_rfc3339())
+        .expect("force schedule as due");
+
+    app.dispatch_due_schedules(50)
+        .await
+        .expect("dispatch due schedules");
+
+    let after = store
+        .list_schedules(10)
+        .expect("list schedules after dispatch");
+    assert_eq!(after.len(), 1, "expected one schedule");
+    assert_eq!(after[0].state, ScheduleState::Scheduled);
+    assert!(
+        after[0].run_at > forced_due,
+        "cron schedule should be re-planned after due timestamp"
+    );
+}

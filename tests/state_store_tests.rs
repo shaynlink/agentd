@@ -51,6 +51,34 @@ fn enforces_terminal_state_transitions() {
 }
 
 #[test]
+fn enforces_pause_resume_transition_rules() {
+    let store = SqliteStore::new(temp_db_path());
+    store.init().expect("init sqlite schema");
+
+    let agent = make_agent("a3", AgentState::Pending);
+    store.create_agent(&agent).expect("insert agent");
+
+    store
+        .update_state(&agent.id, AgentState::Running)
+        .expect("pending -> running must pass");
+    store
+        .update_state(&agent.id, AgentState::Paused)
+        .expect("running -> paused must pass");
+
+    let err = store
+        .update_state(&agent.id, AgentState::Succeeded)
+        .expect_err("paused -> succeeded must fail");
+    assert!(
+        err.to_string().contains("invalid state transition"),
+        "unexpected error: {err}"
+    );
+
+    store
+        .update_state(&agent.id, AgentState::Running)
+        .expect("paused -> running must pass");
+}
+
+#[test]
 fn recovers_running_agents_and_clears_locks() {
     let store = SqliteStore::new(temp_db_path());
     store.init().expect("init sqlite schema");
