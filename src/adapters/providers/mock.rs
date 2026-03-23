@@ -12,6 +12,12 @@ impl MockProvider {
     }
 }
 
+impl Default for MockProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl Provider for MockProvider {
     fn name(&self) -> &'static str {

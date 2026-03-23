@@ -11,6 +11,12 @@ impl HttpProvider {
     }
 }
 
+impl Default for HttpProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl Provider for HttpProvider {
     fn name(&self) -> &'static str {

@@ -32,7 +32,8 @@ impl App {
     ) -> Result<()> {
         let provider = providers::build_provider(provider_name)?;
         let plan = provider.generate_plan(goal).await?;
-        let serialized = serde_yaml::to_string(&plan).context("failed to serialize plan as YAML")?;
+        let serialized =
+            serde_yaml::to_string(&plan).context("failed to serialize plan as YAML")?;
         if let Some(path) = output {
             std::fs::write(path, serialized)
                 .with_context(|| format!("failed to write plan file: {}", path.display()))?;
@@ -52,7 +53,11 @@ impl App {
             serde_yaml::from_str(&content).context("failed to parse YAML plan")?
         };
 
-        println!("running plan '{}' with {} step(s)", plan.name, plan.steps.len());
+        println!(
+            "running plan '{}' with {} step(s)",
+            plan.name,
+            plan.steps.len()
+        );
         for step in plan.steps {
             let provider_name = step.provider.as_deref().unwrap_or(default_provider);
             self.spawn_and_run(
@@ -88,7 +93,8 @@ impl App {
         };
 
         self.store.update_state(agent_id, AgentState::Running)?;
-        self.store.append_log(agent_id, "info", "attach requested")?;
+        self.store
+            .append_log(agent_id, "info", "attach requested")?;
 
         let mut attempt = 0;
         loop {
@@ -172,7 +178,8 @@ impl App {
         let provider = providers::build_provider(&agent.provider)?;
         let _ = provider.cancel(agent_id).await;
         self.store.update_state(agent_id, AgentState::Cancelled)?;
-        self.store.append_log(agent_id, "info", "stopped/cancelled")?;
+        self.store
+            .append_log(agent_id, "info", "stopped/cancelled")?;
         println!("stopped {agent_id}");
         Ok(())
     }

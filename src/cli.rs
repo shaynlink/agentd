@@ -6,7 +6,11 @@ use clap::{Parser, Subcommand};
 use crate::app::App;
 
 #[derive(Debug, Parser)]
-#[command(name = "agentd", version, about = "Provider-agnostic sub-agent orchestrator")]
+#[command(
+    name = "agentd",
+    version,
+    about = "Provider-agnostic sub-agent orchestrator"
+)]
 struct Cli {
     #[arg(long, default_value = "./.agentd/state.db")]
     db_path: String,

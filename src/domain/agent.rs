@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AgentState {
@@ -24,17 +25,21 @@ impl AgentState {
             Self::TimedOut => "timed_out",
         }
     }
+}
 
-    pub fn from_str(value: &str) -> Option<Self> {
+impl FromStr for AgentState {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "pending" => Some(Self::Pending),
-            "running" => Some(Self::Running),
-            "paused" => Some(Self::Paused),
-            "succeeded" => Some(Self::Succeeded),
-            "failed" => Some(Self::Failed),
-            "cancelled" => Some(Self::Cancelled),
-            "timed_out" => Some(Self::TimedOut),
-            _ => None,
+            "pending" => Ok(Self::Pending),
+            "running" => Ok(Self::Running),
+            "paused" => Ok(Self::Paused),
+            "succeeded" => Ok(Self::Succeeded),
+            "failed" => Ok(Self::Failed),
+            "cancelled" => Ok(Self::Cancelled),
+            "timed_out" => Ok(Self::TimedOut),
+            _ => Err(()),
         }
     }
 }
