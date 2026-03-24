@@ -1,13 +1,17 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::collections::HashSet;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::json;
 
+use crate::app::runtime_executor::RuntimeExecutor;
 use crate::adapters::runtimes;
 use crate::adapters::security;
+use crate::adapters::security::local_policy::{LocalPolicyConfig, LocalPolicyEngine};
+use crate::adapters::security::local_workspace_guard::LocalWorkspaceGuard;
 use crate::domain::audit_log::{CommandAuditEntry, output_preview};
 use crate::domain::permission::{PermissionSet, RuntimeRole};
 use crate::domain::plan::Plan;
@@ -176,28 +180,42 @@ fn compute_diff(
     })
 }
 
-// ============================================================================
-// Runtime Execution
-// ============================================================================
+fn build_runtime_executor(
+    sandbox_cfg: &crate::config::SandboxProviderConfig,
+    agent_workdir: &Path,
+) -> Result<RuntimeExecutor> {
+    let mut policy_cfg = LocalPolicyConfig::full_trusted();
+    policy_cfg.blocked_commands = ["sudo", "ssh", "scp", "docker", "kubectl"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<HashSet<_>>();
+    let canonical_workdir = fs::canonicalize(agent_workdir)
+        .unwrap_or_else(|_| agent_workdir.to_path_buf());
+    policy_cfg.allowed_exec_cwds = vec![canonical_workdir.clone()];
 
-async fn run_via_process(
-    command_name: &str,
-    args: &[String],
-    agent_prompt: &str,
-    workdir: &Path,
-    timeout_secs: u64,
-) -> Result<(String, i32)> {
+    let policy = Box::new(LocalPolicyEngine::with_config("sandbox", policy_cfg));
+
+    let blocked_paths = vec![PathBuf::from(".git"), PathBuf::from(".env")];
+    let allowed_read_paths: Vec<PathBuf> = sandbox_cfg
+        .allowed_read_paths
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+    let allowed_write_paths: Vec<PathBuf> = sandbox_cfg
+        .allowed_write_paths
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+
+    let workspace_guard = Box::new(LocalWorkspaceGuard::new(
+        canonical_workdir,
+        blocked_paths,
+        allowed_read_paths,
+        allowed_write_paths,
+    )?);
     let runtime = runtimes::build_runtime("builtin")?;
-    let mut full_args = args.to_vec();
-    if !agent_prompt.is_empty() {
-        full_args.push(agent_prompt.to_string());
-    }
 
-    let result = runtime
-        .execute(command_name, &full_args, timeout_secs, workdir, None)
-        .await?;
-
-    Ok((result.output, result.exit_code))
+    Ok(RuntimeExecutor::new(policy, workspace_guard, runtime))
 }
 
 // ============================================================================
@@ -351,8 +369,18 @@ impl Provider for SandboxProvider {
                 } else {
                     (parts[0], Vec::new())
                 };
+                let executor = build_runtime_executor(sandbox_cfg, &agent_workdir)?;
+                let exec_result = executor
+                    .execute_command(
+                        &request.agent_id,
+                        cmd,
+                        &args,
+                        request.timeout_secs,
+                        &agent_workdir,
+                    )
+                    .await?;
 
-                run_via_process(cmd, &args, "", &agent_workdir, request.timeout_secs).await?
+                (exec_result.output, exec_result.exit_code)
             }
             "docker" => {
                 bail!("docker runtime not yet implemented")
