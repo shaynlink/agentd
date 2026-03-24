@@ -178,6 +178,12 @@ Additional options for broader use-cases:
 - `list --state <state> --provider <provider> --limit <n> --ids-only --sort-by <created_at|state|provider>`
 - `logs --id <agent_id> --limit <n> --level <info|warn|error> --contains <text>`
 
+Sandbox security/audit environment options:
+
+- `AGENTD_SANDBOX_ROLE=admin|operator|viewer`
+- `AGENTD_SANDBOX_AUDIT_BACKEND=file|sqlite`
+- `AGENTD_SANDBOX_AUDIT_LOG_PATH=./.agentd/audit.log` (or `./.agentd/audit.db` for sqlite backend)
+
 ### CLI Provider Configuration
 
 The `cli` provider reads environment variables:

@@ -42,6 +42,7 @@ pub struct SandboxProviderConfig {
     pub role: String,
     pub workdir: PathBuf,
     pub audit_log_path: PathBuf,
+    pub audit_backend: String,
     pub allowed_commands: Vec<String>,
     pub allowed_read_paths: Vec<String>,
     pub allowed_write_paths: Vec<String>,
@@ -93,6 +94,7 @@ struct FileSandboxProviderConfig {
     role: Option<String>,
     workdir: Option<PathBuf>,
     audit_log_path: Option<PathBuf>,
+    audit_backend: Option<String>,
     allowed_commands: Option<Vec<String>>,
     allowed_read_paths: Option<Vec<String>>,
     allowed_write_paths: Option<Vec<String>>,
@@ -277,6 +279,11 @@ impl AppConfig {
             .or_else(|| file_sandbox.and_then(|s| s.audit_log_path.clone()))
             .unwrap_or_else(|| PathBuf::from("./.agentd/audit.log"));
 
+        let audit_backend = env::var("AGENTD_SANDBOX_AUDIT_BACKEND")
+            .ok()
+            .or_else(|| file_sandbox.and_then(|s| s.audit_backend.clone()))
+            .unwrap_or_else(|| "file".to_string());
+
         let allowed_commands = if let Ok(raw) = env::var("AGENTD_SANDBOX_ALLOWED_COMMANDS_JSON") {
             serde_json::from_str::<Vec<String>>(&raw)
                 .context("AGENTD_SANDBOX_ALLOWED_COMMANDS_JSON must be a JSON string array")?
@@ -362,6 +369,7 @@ impl AppConfig {
                 role,
                 workdir,
                 audit_log_path,
+                audit_backend,
                 allowed_commands,
                 allowed_read_paths,
                 allowed_write_paths,

@@ -6,6 +6,7 @@ use agentd::adapters::store::sqlite::SqliteStore;
 use agentd::app::{App, OutputMode, OutputOptions};
 use agentd::domain::agent::AgentState;
 use agentd::ports::store::StateStore;
+use rusqlite::Connection;
 use uuid::Uuid;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -419,6 +420,68 @@ async fn sandbox_provider_persists_audit_log_entries() {
     assert!(
         audit_content.contains("\"allowed\":true"),
         "audit log should contain allowed=true"
+    );
+}
+
+#[tokio::test]
+async fn sandbox_provider_persists_audit_log_entries_in_sqlite_backend() {
+    let sandbox_dir = temp_sandbox_dir();
+    let db_path = temp_db_path();
+    let audit_db_path = temp_audit_path();
+
+    let _env = EnvGuard::set(&[
+        ("AGENTD_SANDBOX_RUNTIME", "process".to_string()),
+        ("AGENTD_SANDBOX_ROLE", "operator".to_string()),
+        ("AGENTD_SANDBOX_WORKDIR", sandbox_dir.clone()),
+        ("AGENTD_SANDBOX_AUDIT_LOG_PATH", audit_db_path.clone()),
+        ("AGENTD_SANDBOX_AUDIT_BACKEND", "sqlite".to_string()),
+        ("AGENTD_SANDBOX_TRACE_COMMANDS", "true".to_string()),
+        ("AGENTD_SANDBOX_TRACE_DIFF", "false".to_string()),
+    ]);
+
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
+    app.spawn(
+        "audit_sqlite_test",
+        "sandbox",
+        "echo sqlite-audited",
+        5,
+        0,
+        None,
+    )
+    .await
+    .expect("spawn sqlite audit test agent");
+
+    let store = SqliteStore::new(db_path);
+    let agents = store.list_agents().expect("list agents");
+    let agent_id = agents[0].id.clone();
+
+    app.attach(&agent_id, 5, 0, false, false, None)
+        .await
+        .expect("attach sqlite audit test agent");
+
+    let conn = Connection::open(&audit_db_path).expect("open sqlite audit db");
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM security_audit_logs", [], |row| {
+            row.get(0)
+        })
+        .expect("count audit logs");
+    assert!(count >= 1, "expected at least one sqlite audit row");
+
+    let payload: String = conn
+        .query_row(
+            "SELECT payload FROM security_audit_logs ORDER BY id DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .expect("fetch latest audit payload");
+
+    assert!(
+        payload.contains("\"agent_id\""),
+        "missing agent_id in payload"
+    );
+    assert!(
+        payload.contains("\"command_input\":\"echo sqlite-audited\""),
+        "missing command_input in payload"
     );
 }
 

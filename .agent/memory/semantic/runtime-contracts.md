@@ -51,7 +51,10 @@ Files:
 Behavior:
 - role-based command gating (`viewer` denied execution)
 - path access checks for runtime workdir
-- persistent audit logging in JSON-lines style (`AGENTD_SANDBOX_AUDIT_LOG_PATH`)
+- persistent audit logging using backend selection:
+	- `file` backend (JSON-lines file)
+	- `sqlite` backend (`security_audit_logs` table)
+	- configured via `AGENTD_SANDBOX_AUDIT_BACKEND` and `AGENTD_SANDBOX_AUDIT_LOG_PATH`
 
 </section>
 
