@@ -59,6 +59,25 @@ fn structured_log_message(context: &str, provider: &str, category: &str, message
     .to_string()
 }
 
+fn extract_conflicted_files(message: &str) -> Vec<String> {
+    let marker = "conflicted files:";
+    let Some(start) = message.find(marker) else {
+        return Vec::new();
+    };
+
+    let rest = &message[start + marker.len()..];
+    let files_part = match rest.find(". details:") {
+        Some(idx) => &rest[..idx],
+        None => rest,
+    };
+
+    files_part
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 impl App {
     pub fn new(db_path: String, output: OutputOptions) -> Result<Self> {
         let store = SqliteStore::new(db_path);
@@ -842,9 +861,36 @@ impl App {
         source_branch: &str,
         target_branch: &str,
         no_ff: bool,
+        dry_run: bool,
     ) -> Result<()> {
         let adapter = versioning::build_versioning("git")?;
-        let result = adapter.merge(repo_path, source_branch, target_branch, no_ff)?;
+        let result = match adapter.merge(repo_path, source_branch, target_branch, no_ff, dry_run) {
+            Ok(result) => result,
+            Err(err) => {
+                let message = err.to_string();
+                if message.contains("merge conflict while merging") {
+                    let conflicted_files = extract_conflicted_files(&message);
+                    self.emit(
+                        "version_merge_conflict",
+                        json!({
+                            "repo_path": repo_path.display().to_string(),
+                            "source": source_branch,
+                            "target": target_branch,
+                            "dry_run": dry_run,
+                            "conflicted_files": conflicted_files,
+                            "message": message,
+                        }),
+                        Some(format!(
+                            "merge conflict '{}' -> '{}': {}",
+                            source_branch,
+                            target_branch,
+                            conflicted_files.join(", ")
+                        )),
+                    );
+                }
+                return Err(err);
+            }
+        };
 
         self.emit(
             "version_merge",
@@ -854,10 +900,14 @@ impl App {
                 "target": result.target,
                 "commit": result.commit,
                 "no_ff": no_ff,
+                "dry_run": dry_run,
             }),
             Some(format!(
-                "merged '{}' into '{}' at {}",
-                source_branch, target_branch, result.commit
+                "{} '{}' into '{}' at {}",
+                if dry_run { "dry-run merged" } else { "merged" },
+                source_branch,
+                target_branch,
+                result.commit
             )),
         );
         Ok(())

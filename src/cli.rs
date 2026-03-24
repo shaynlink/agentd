@@ -253,6 +253,8 @@ enum Commands {
         target: String,
         #[arg(long, default_value_t = true)]
         no_ff: bool,
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
     },
     /// Hard rollback to a ref (destructive)
     VersionRollback {
@@ -471,7 +473,8 @@ pub async fn run() -> Result<()> {
             source,
             target,
             no_ff,
-        } => app.version_merge(&repo, &source, &target, no_ff),
+            dry_run,
+        } => app.version_merge(&repo, &source, &target, no_ff, dry_run),
         Commands::VersionRollback {
             repo,
             to_ref,

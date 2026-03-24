@@ -119,6 +119,7 @@ impl VersioningPort for GitLikeVersioningAdapter {
         source_branch: &str,
         target_branch: &str,
         no_ff: bool,
+        dry_run: bool,
     ) -> Result<MergeResult> {
         self.ensure_repo(repo_path)?;
         if source_branch.trim().is_empty() || target_branch.trim().is_empty() {
@@ -126,7 +127,16 @@ impl VersioningPort for GitLikeVersioningAdapter {
         }
 
         self.run_git(repo_path, &["checkout", target_branch])?;
-        let merge_output = if no_ff {
+        let merge_output = if dry_run {
+            if no_ff {
+                self.run_git_output(
+                    repo_path,
+                    &["merge", "--no-ff", "--no-commit", source_branch],
+                )?
+            } else {
+                self.run_git_output(repo_path, &["merge", "--no-commit", source_branch])?
+            }
+        } else if no_ff {
             self.run_git_output(
                 repo_path,
                 &[
@@ -167,6 +177,10 @@ impl VersioningPort for GitLikeVersioningAdapter {
                 "merge failed while merging '{source_branch}' into '{target_branch}': {}",
                 details
             );
+        }
+
+        if dry_run {
+            let _ = self.run_git(repo_path, &["merge", "--abort"]);
         }
 
         let commit = self.run_git(repo_path, &["rev-parse", "HEAD"])?;

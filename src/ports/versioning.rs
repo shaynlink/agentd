@@ -31,6 +31,7 @@ pub trait VersioningPort: Send + Sync {
         source_branch: &str,
         target_branch: &str,
         no_ff: bool,
+        dry_run: bool,
     ) -> anyhow::Result<MergeResult>;
 
     fn rollback_hard(&self, repo_path: &Path, to_ref: &str) -> anyhow::Result<String>;

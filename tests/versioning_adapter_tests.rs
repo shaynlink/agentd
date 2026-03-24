@@ -93,7 +93,7 @@ fn git_like_branch_diff_merge_rollback_flow() {
     );
 
     let result = adapter
-        .merge(&repo, "feature/rbac", &base_branch, true)
+        .merge(&repo, "feature/rbac", &base_branch, true, false)
         .expect("merge feature into master");
     assert_eq!(result.source, "feature/rbac");
     assert_eq!(result.target, base_branch);
@@ -139,7 +139,7 @@ fn git_like_merge_conflict_reports_files_and_aborts_merge_state() {
     run_git(&repo, &["commit", "-m", "right change"]);
 
     let err = adapter
-        .merge(&repo, "feature/left", "feature/right", true)
+        .merge(&repo, "feature/left", "feature/right", true, false)
         .expect_err("merge should fail with conflict");
     let message = err.to_string();
     assert!(
@@ -152,4 +152,35 @@ fn git_like_merge_conflict_reports_files_and_aborts_merge_state() {
         status.is_empty(),
         "merge conflict should be auto-aborted and leave clean status, got: {status}"
     );
+}
+
+#[test]
+fn git_like_merge_dry_run_keeps_head_unchanged() {
+    let repo = setup_repo();
+    let base_branch = current_branch(&repo);
+    let adapter = versioning::build_versioning("git").expect("build versioning adapter");
+
+    adapter
+        .create_branch(&repo, "feature/dry-run", Some(&base_branch))
+        .expect("create dry-run branch");
+
+    run_git(&repo, &["checkout", "feature/dry-run"]);
+    let file = repo.join("README.md");
+    fs::write(&file, "hello\ndry-run\n").expect("update dry-run branch file");
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "dry-run branch commit"]);
+
+    run_git(&repo, &["checkout", &base_branch]);
+    let head_before = git_stdout(&repo, &["rev-parse", "HEAD"]);
+
+    let result = adapter
+        .merge(&repo, "feature/dry-run", &base_branch, true, true)
+        .expect("dry-run merge should succeed");
+    assert_eq!(result.commit, head_before, "dry-run should not move HEAD");
+
+    let head_after = git_stdout(&repo, &["rev-parse", "HEAD"]);
+    assert_eq!(head_after, head_before, "HEAD should remain unchanged");
+
+    let status = git_stdout(&repo, &["status", "--porcelain"]);
+    assert!(status.is_empty(), "dry-run should leave clean status: {status}");
 }
