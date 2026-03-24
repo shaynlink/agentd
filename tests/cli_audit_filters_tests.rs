@@ -34,9 +34,9 @@ fn temp_path(name: &str) -> PathBuf {
     path
 }
 
-    fn temp_db_path() -> String {
-        temp_path("state.db").to_string_lossy().to_string()
-    }
+fn temp_db_path() -> String {
+    temp_path("state.db").to_string_lossy().to_string()
+}
 
 fn test_sandbox_config(audit_db_path: PathBuf) -> SandboxProviderConfig {
     SandboxProviderConfig {
@@ -56,6 +56,7 @@ fn test_sandbox_config(audit_db_path: PathBuf) -> SandboxProviderConfig {
 
 #[tokio::test]
 async fn cli_audit_list_applies_filters_end_to_end() {
+    let db_path = temp_db_path();
     let audit_db_path = temp_path("audit-e2e.db");
     let cfg = test_sandbox_config(audit_db_path.clone());
     let securable = LocalSecurable::new(&cfg);
@@ -116,6 +117,8 @@ async fn cli_audit_list_applies_filters_end_to_end() {
 
     let out = run_cli_with_env(
         &[
+            "--db-path",
+            &db_path,
             "--output",
             "json",
             "audit-list",
@@ -134,7 +137,11 @@ async fn cli_audit_list_applies_filters_end_to_end() {
         ],
         &envs,
     );
-    assert!(out.status.success(), "audit-list should succeed");
+    assert!(
+        out.status.success(),
+        "audit-list should succeed, stderr: {}",
+        stderr_text(&out)
+    );
 
     let payload: Value = serde_json::from_str(&stdout_text(&out)).expect("stdout should be JSON");
     let data = payload
@@ -205,5 +212,110 @@ fn cli_audit_list_invalid_since_returns_validation_error() {
             .contains("invalid --since timestamp"),
         "unexpected error payload: {}",
         stderr_text(&out)
+    );
+}
+
+#[tokio::test]
+async fn cli_audit_list_role_and_runtime_match_case_insensitively() {
+    let db_path = temp_db_path();
+    let audit_db_path = temp_path("audit-caseinsensitive.db");
+    let cfg = test_sandbox_config(audit_db_path.clone());
+    let securable = LocalSecurable::new(&cfg);
+
+    securable
+        .log_audit_event(
+            &serde_json::json!({
+                "ts": "2026-03-01T08:00:00Z",
+                "agent_id": "agent-p",
+                "role": "operator",
+                "runtime": "process",
+                "allowed": true,
+                "command_input": "echo proc"
+            })
+            .to_string(),
+        )
+        .await
+        .expect("write process event");
+
+    securable
+        .log_audit_event(
+            &serde_json::json!({
+                "ts": "2026-03-01T09:00:00Z",
+                "agent_id": "agent-d",
+                "role": "viewer",
+                "runtime": "docker",
+                "allowed": false,
+                "command_input": "echo docker"
+            })
+            .to_string(),
+        )
+        .await
+        .expect("write docker event");
+
+    securable
+        .log_audit_event(
+            &serde_json::json!({
+                "ts": "2026-03-01T10:00:00Z",
+                "agent_id": "agent-a",
+                "role": "admin",
+                "runtime": "process",
+                "allowed": true,
+                "command_input": "echo admin"
+            })
+            .to_string(),
+        )
+        .await
+        .expect("write admin event");
+
+    let audit_db_path_string = audit_db_path.to_string_lossy().to_string();
+    let envs = [
+        ("AGENTD_SANDBOX_AUDIT_BACKEND", "sqlite"),
+        (
+            "AGENTD_SANDBOX_AUDIT_LOG_PATH",
+            audit_db_path_string.as_str(),
+        ),
+    ];
+
+    let out = run_cli_with_env(
+        &[
+            "--db-path",
+            &db_path,
+            "--output",
+            "json",
+            "audit-list",
+            "--limit",
+            "50",
+            "--role",
+            "OPERATOR",
+            "--runtime",
+            "PROCESS",
+        ],
+        &envs,
+    );
+    assert!(
+        out.status.success(),
+        "audit-list with uppercase role/runtime should succeed, stderr: {}",
+        stderr_text(&out)
+    );
+
+    let payload: Value = serde_json::from_str(&stdout_text(&out)).expect("stdout should be JSON");
+    let data = payload
+        .get("data")
+        .expect("json payload should contain data");
+    let events = data
+        .get("events")
+        .and_then(Value::as_array)
+        .expect("data.events should be an array");
+
+    assert_eq!(
+        events.len(),
+        1,
+        "case-insensitive role/runtime filter should match exactly one event"
+    );
+    let first = &events[0];
+    assert_eq!(
+        first.get("command_input").and_then(Value::as_str),
+        Some("echo proc"),
+        "expected filtered event with lowercase role=operator and runtime=process"
     );
 }
