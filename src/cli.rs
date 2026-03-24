@@ -233,6 +233,8 @@ enum Commands {
     VersionBranchList {
         #[arg(long)]
         repo: PathBuf,
+        #[arg(long, default_value_t = false)]
+        report_json: bool,
     },
     /// Show diff between two refs
     VersionDiff {
@@ -242,6 +244,8 @@ enum Commands {
         from_ref: String,
         #[arg(long)]
         to_ref: String,
+        #[arg(long, default_value_t = false)]
+        report_json: bool,
     },
     /// Merge source branch into target branch
     VersionMerge {
@@ -255,6 +259,8 @@ enum Commands {
         no_ff: bool,
         #[arg(long, default_value_t = false)]
         dry_run: bool,
+        #[arg(long, default_value_t = false)]
+        report_json: bool,
     },
     /// Hard rollback to a ref (destructive)
     VersionRollback {
@@ -462,19 +468,23 @@ pub async fn run() -> Result<()> {
             branch,
             from_ref,
         } => app.version_branch_create(&repo, &branch, from_ref.as_deref()),
-        Commands::VersionBranchList { repo } => app.version_branch_list(&repo),
+        Commands::VersionBranchList { repo, report_json } => {
+            app.version_branch_list(&repo, report_json)
+        }
         Commands::VersionDiff {
             repo,
             from_ref,
             to_ref,
-        } => app.version_diff(&repo, &from_ref, &to_ref),
+            report_json,
+        } => app.version_diff(&repo, &from_ref, &to_ref, report_json),
         Commands::VersionMerge {
             repo,
             source,
             target,
             no_ff,
             dry_run,
-        } => app.version_merge(&repo, &source, &target, no_ff, dry_run),
+            report_json,
+        } => app.version_merge(&repo, &source, &target, no_ff, dry_run, report_json),
         Commands::VersionRollback {
             repo,
             to_ref,

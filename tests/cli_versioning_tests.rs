@@ -233,3 +233,169 @@ fn cli_version_rollback_requires_explicit_confirmation() {
         stderr_text(&rollback)
     );
 }
+
+#[test]
+fn cli_version_merge_conflict_report_json_payload() {
+    let repo = setup_repo();
+    let db_path = temp_db_path();
+    let base_branch = current_branch(&repo);
+    let repo_str = repo.to_string_lossy().to_string();
+
+    run_git(&repo, &["branch", "feature/left", &base_branch]);
+    run_git(&repo, &["branch", "feature/right", &base_branch]);
+
+    run_git(&repo, &["checkout", "feature/left"]);
+    fs::write(repo.join("README.md"), "left\n").expect("write left branch file");
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "left change"]);
+
+    run_git(&repo, &["checkout", "feature/right"]);
+    fs::write(repo.join("README.md"), "right\n").expect("write right branch file");
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "right change"]);
+
+    let out = run_cli(&[
+        "--db-path",
+        &db_path,
+        "version-merge",
+        "--repo",
+        &repo_str,
+        "--source",
+        "feature/left",
+        "--target",
+        "feature/right",
+        "--report-json",
+    ]);
+    assert!(
+        !out.status.success(),
+        "merge should fail with conflict when report-json enabled"
+    );
+
+    let report: Value = serde_json::from_str(&stdout_text(&out)).expect("stdout should be JSON");
+    assert_eq!(
+        report
+            .get("event")
+            .and_then(Value::as_str),
+        Some("version_merge_report")
+    );
+    assert_eq!(
+        report
+            .get("data")
+            .and_then(|d| d.get("status"))
+            .and_then(Value::as_str),
+        Some("conflict")
+    );
+    assert!(
+        report
+            .get("data")
+            .and_then(|d| d.get("conflicted_files"))
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .any(|v| v.as_str() == Some("README.md"))
+            })
+            .unwrap_or(false),
+        "conflicted files should include README.md, got: {}",
+        stdout_text(&out)
+    );
+}
+
+#[test]
+fn cli_version_branch_list_report_json_payload() {
+    let repo = setup_repo();
+    let db_path = temp_db_path();
+    let base_branch = current_branch(&repo);
+    let repo_str = repo.to_string_lossy().to_string();
+
+    let create = run_cli(&[
+        "--db-path",
+        &db_path,
+        "version-branch-create",
+        "--repo",
+        &repo_str,
+        "--branch",
+        "feature/report-list",
+        "--from-ref",
+        &base_branch,
+    ]);
+    assert!(
+        create.status.success(),
+        "version-branch-create should succeed, stderr: {}",
+        stderr_text(&create)
+    );
+
+    let out = run_cli(&[
+        "--db-path",
+        &db_path,
+        "version-branch-list",
+        "--repo",
+        &repo_str,
+        "--report-json",
+    ]);
+    assert!(out.status.success(), "branch-list report-json should succeed");
+
+    let payload: Value = serde_json::from_str(&stdout_text(&out)).expect("stdout should be JSON");
+    assert_eq!(
+        payload.get("event").and_then(Value::as_str),
+        Some("version_branch_list_report")
+    );
+    assert!(
+        payload
+            .get("data")
+            .and_then(|d| d.get("branches"))
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter().any(|b| {
+                    b.get("name").and_then(Value::as_str) == Some("feature/report-list")
+                })
+            })
+            .unwrap_or(false),
+        "expected report payload to include created branch: {}",
+        stdout_text(&out)
+    );
+}
+
+#[test]
+fn cli_version_diff_report_json_payload() {
+    let repo = setup_repo();
+    let db_path = temp_db_path();
+    let base_branch = current_branch(&repo);
+    let repo_str = repo.to_string_lossy().to_string();
+
+    run_git(&repo, &["branch", "feature/report-diff", &base_branch]);
+    run_git(&repo, &["checkout", "feature/report-diff"]);
+    fs::write(repo.join("README.md"), "hello\nreport-diff\n").expect("write diff branch file");
+    run_git(&repo, &["add", "."]);
+    run_git(&repo, &["commit", "-m", "report diff commit"]);
+    run_git(&repo, &["checkout", &base_branch]);
+
+    let out = run_cli(&[
+        "--db-path",
+        &db_path,
+        "version-diff",
+        "--repo",
+        &repo_str,
+        "--from-ref",
+        &base_branch,
+        "--to-ref",
+        "feature/report-diff",
+        "--report-json",
+    ]);
+    assert!(out.status.success(), "version-diff report-json should succeed");
+
+    let payload: Value = serde_json::from_str(&stdout_text(&out)).expect("stdout should be JSON");
+    assert_eq!(
+        payload.get("event").and_then(Value::as_str),
+        Some("version_diff_report")
+    );
+    assert!(
+        payload
+            .get("data")
+            .and_then(|d| d.get("diff"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .contains("report-diff"),
+        "expected diff report payload to include modified line: {}",
+        stdout_text(&out)
+    );
+}

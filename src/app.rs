@@ -810,9 +810,24 @@ impl App {
         Ok(())
     }
 
-    pub fn version_branch_list(&self, repo_path: &Path) -> Result<()> {
+    pub fn version_branch_list(&self, repo_path: &Path, report_json: bool) -> Result<()> {
         let adapter = versioning::build_versioning("git")?;
         let branches = adapter.list_branches(repo_path)?;
+
+        if report_json {
+            println!(
+                "{}",
+                json!({
+                    "event": "version_branch_list_report",
+                    "data": {
+                        "repo_path": repo_path.display().to_string(),
+                        "count": branches.len(),
+                        "branches": branches,
+                    }
+                })
+            );
+            return Ok(());
+        }
 
         self.emit(
             "version_branch_list",
@@ -838,9 +853,31 @@ impl App {
         Ok(())
     }
 
-    pub fn version_diff(&self, repo_path: &Path, from_ref: &str, to_ref: &str) -> Result<()> {
+    pub fn version_diff(
+        &self,
+        repo_path: &Path,
+        from_ref: &str,
+        to_ref: &str,
+        report_json: bool,
+    ) -> Result<()> {
         let adapter = versioning::build_versioning("git")?;
         let diff = adapter.diff(repo_path, from_ref, to_ref)?;
+
+        if report_json {
+            println!(
+                "{}",
+                json!({
+                    "event": "version_diff_report",
+                    "data": {
+                        "repo_path": repo_path.display().to_string(),
+                        "from_ref": from_ref,
+                        "to_ref": to_ref,
+                        "diff": diff,
+                    }
+                })
+            );
+            return Ok(());
+        }
 
         self.emit(
             "version_diff",
@@ -862,6 +899,7 @@ impl App {
         target_branch: &str,
         no_ff: bool,
         dry_run: bool,
+        report_json: bool,
     ) -> Result<()> {
         let adapter = versioning::build_versioning("git")?;
         let result = match adapter.merge(repo_path, source_branch, target_branch, no_ff, dry_run) {
@@ -870,27 +908,64 @@ impl App {
                 let message = err.to_string();
                 if message.contains("merge conflict while merging") {
                     let conflicted_files = extract_conflicted_files(&message);
-                    self.emit(
-                        "version_merge_conflict",
-                        json!({
-                            "repo_path": repo_path.display().to_string(),
-                            "source": source_branch,
-                            "target": target_branch,
-                            "dry_run": dry_run,
-                            "conflicted_files": conflicted_files,
-                            "message": message,
-                        }),
-                        Some(format!(
-                            "merge conflict '{}' -> '{}': {}",
-                            source_branch,
-                            target_branch,
-                            conflicted_files.join(", ")
-                        )),
-                    );
+                    if report_json {
+                        println!(
+                            "{}",
+                            json!({
+                                "event": "version_merge_report",
+                                "data": {
+                                    "status": "conflict",
+                                    "repo_path": repo_path.display().to_string(),
+                                    "source": source_branch,
+                                    "target": target_branch,
+                                    "dry_run": dry_run,
+                                    "conflicted_files": conflicted_files,
+                                    "message": message,
+                                }
+                            })
+                        );
+                    } else {
+                        self.emit(
+                            "version_merge_conflict",
+                            json!({
+                                "repo_path": repo_path.display().to_string(),
+                                "source": source_branch,
+                                "target": target_branch,
+                                "dry_run": dry_run,
+                                "conflicted_files": conflicted_files,
+                                "message": message,
+                            }),
+                            Some(format!(
+                                "merge conflict '{}' -> '{}': {}",
+                                source_branch,
+                                target_branch,
+                                conflicted_files.join(", ")
+                            )),
+                        );
+                    }
                 }
                 return Err(err);
             }
         };
+
+        if report_json {
+            println!(
+                "{}",
+                json!({
+                    "event": "version_merge_report",
+                    "data": {
+                        "status": "merged",
+                        "repo_path": repo_path.display().to_string(),
+                        "source": result.source,
+                        "target": result.target,
+                        "commit": result.commit,
+                        "no_ff": no_ff,
+                        "dry_run": dry_run,
+                    }
+                })
+            );
+            return Ok(());
+        }
 
         self.emit(
             "version_merge",
