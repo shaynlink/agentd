@@ -220,6 +220,49 @@ enum Commands {
         #[arg(long, default_value_t = 50)]
         limit: usize,
     },
+    /// Create a branch in a git repository
+    VersionBranchCreate {
+        #[arg(long)]
+        repo: PathBuf,
+        #[arg(long)]
+        branch: String,
+        #[arg(long)]
+        from_ref: Option<String>,
+    },
+    /// List branches in a git repository
+    VersionBranchList {
+        #[arg(long)]
+        repo: PathBuf,
+    },
+    /// Show diff between two refs
+    VersionDiff {
+        #[arg(long)]
+        repo: PathBuf,
+        #[arg(long)]
+        from_ref: String,
+        #[arg(long)]
+        to_ref: String,
+    },
+    /// Merge source branch into target branch
+    VersionMerge {
+        #[arg(long)]
+        repo: PathBuf,
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        target: String,
+        #[arg(long, default_value_t = true)]
+        no_ff: bool,
+    },
+    /// Hard rollback to a ref (destructive)
+    VersionRollback {
+        #[arg(long)]
+        repo: PathBuf,
+        #[arg(long)]
+        to_ref: String,
+        #[arg(long, default_value_t = false)]
+        confirm_hard_reset: bool,
+    },
 }
 
 pub async fn run() -> Result<()> {
@@ -412,5 +455,27 @@ pub async fn run() -> Result<()> {
             )
         }
         Commands::ScheduleDispatchDue { limit } => app.dispatch_due_schedules(limit).await,
+        Commands::VersionBranchCreate {
+            repo,
+            branch,
+            from_ref,
+        } => app.version_branch_create(&repo, &branch, from_ref.as_deref()),
+        Commands::VersionBranchList { repo } => app.version_branch_list(&repo),
+        Commands::VersionDiff {
+            repo,
+            from_ref,
+            to_ref,
+        } => app.version_diff(&repo, &from_ref, &to_ref),
+        Commands::VersionMerge {
+            repo,
+            source,
+            target,
+            no_ff,
+        } => app.version_merge(&repo, &source, &target, no_ff),
+        Commands::VersionRollback {
+            repo,
+            to_ref,
+            confirm_hard_reset,
+        } => app.version_rollback_hard(&repo, &to_ref, confirm_hard_reset),
     }
 }

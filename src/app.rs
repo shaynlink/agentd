@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::adapters::providers;
 use crate::adapters::security;
 use crate::adapters::store::sqlite::SqliteStore;
+use crate::adapters::versioning;
 use crate::domain::agent::{AgentRecord, AgentState};
 use crate::domain::plan::Plan;
 use crate::domain::schedule::{ScheduleRecord, ScheduleState};
@@ -760,6 +761,127 @@ impl App {
                 binding_count,
                 role_policy_count
             )),
+        );
+        Ok(())
+    }
+
+    pub fn version_branch_create(
+        &self,
+        repo_path: &Path,
+        branch: &str,
+        from_ref: Option<&str>,
+    ) -> Result<()> {
+        let adapter = versioning::build_versioning("git")?;
+        adapter.create_branch(repo_path, branch, from_ref)?;
+
+        self.emit(
+            "version_branch_created",
+            json!({
+                "repo_path": repo_path.display().to_string(),
+                "branch": branch,
+                "from_ref": from_ref,
+            }),
+            Some(format!(
+                "created branch '{branch}'{}",
+                from_ref
+                    .map(|base| format!(" from '{base}'"))
+                    .unwrap_or_default()
+            )),
+        );
+        Ok(())
+    }
+
+    pub fn version_branch_list(&self, repo_path: &Path) -> Result<()> {
+        let adapter = versioning::build_versioning("git")?;
+        let branches = adapter.list_branches(repo_path)?;
+
+        self.emit(
+            "version_branch_list",
+            json!({
+                "repo_path": repo_path.display().to_string(),
+                "count": branches.len(),
+                "branches": branches,
+            }),
+            Some(
+                branches
+                    .iter()
+                    .map(|b| {
+                        if b.current {
+                            format!("* {}", b.name)
+                        } else {
+                            format!("  {}", b.name)
+                        }
+                    })
+                    .collect::<Vec<String>>()
+                    .join("\n"),
+            ),
+        );
+        Ok(())
+    }
+
+    pub fn version_diff(&self, repo_path: &Path, from_ref: &str, to_ref: &str) -> Result<()> {
+        let adapter = versioning::build_versioning("git")?;
+        let diff = adapter.diff(repo_path, from_ref, to_ref)?;
+
+        self.emit(
+            "version_diff",
+            json!({
+                "repo_path": repo_path.display().to_string(),
+                "from_ref": from_ref,
+                "to_ref": to_ref,
+                "diff": diff,
+            }),
+            Some(diff),
+        );
+        Ok(())
+    }
+
+    pub fn version_merge(
+        &self,
+        repo_path: &Path,
+        source_branch: &str,
+        target_branch: &str,
+        no_ff: bool,
+    ) -> Result<()> {
+        let adapter = versioning::build_versioning("git")?;
+        let result = adapter.merge(repo_path, source_branch, target_branch, no_ff)?;
+
+        self.emit(
+            "version_merge",
+            json!({
+                "repo_path": repo_path.display().to_string(),
+                "source": result.source,
+                "target": result.target,
+                "commit": result.commit,
+                "no_ff": no_ff,
+            }),
+            Some(format!(
+                "merged '{}' into '{}' at {}",
+                source_branch, target_branch, result.commit
+            )),
+        );
+        Ok(())
+    }
+
+    pub fn version_rollback_hard(&self, repo_path: &Path, to_ref: &str, confirm: bool) -> Result<()> {
+        if !confirm {
+            bail!(
+                "destructive rollback requires --confirm-hard-reset=true (this performs git reset --hard)"
+            );
+        }
+
+        let adapter = versioning::build_versioning("git")?;
+        let commit = adapter.rollback_hard(repo_path, to_ref)?;
+
+        self.emit(
+            "version_rollback",
+            json!({
+                "repo_path": repo_path.display().to_string(),
+                "to_ref": to_ref,
+                "head": commit,
+                "mode": "hard",
+            }),
+            Some(format!("hard rollback to '{}' (HEAD={commit})", to_ref)),
         );
         Ok(())
     }
