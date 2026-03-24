@@ -10,6 +10,7 @@ use tokio::time::timeout;
 use uuid::Uuid;
 
 use crate::adapters::providers;
+use crate::adapters::security;
 use crate::adapters::store::sqlite::SqliteStore;
 use crate::domain::agent::{AgentRecord, AgentState};
 use crate::domain::plan::Plan;
@@ -563,6 +564,65 @@ impl App {
             Some(
                 logs.iter()
                     .map(|log| format!("{} [{}] {}", log.ts, log.level, log.message))
+                    .collect::<Vec<String>>()
+                    .join("\n"),
+            ),
+        );
+
+        Ok(())
+    }
+
+    pub async fn audit_list(
+        &self,
+        limit: usize,
+        role: Option<&str>,
+        allowed: Option<bool>,
+    ) -> Result<()> {
+        let cfg = crate::config::AppConfig::load()?;
+        let securable = security::build_securable(&cfg.sandbox);
+        let raw_events = securable.list_audit_events(limit).await?;
+
+        let mut events = Vec::new();
+        for payload in raw_events {
+            if let Ok(v) = serde_json::from_str::<Value>(&payload) {
+                events.push(v);
+            }
+        }
+
+        if let Some(role_filter) = role {
+            events.retain(|e| {
+                e.get("role")
+                    .and_then(Value::as_str)
+                    .map(|r| r.eq_ignore_ascii_case(role_filter))
+                    .unwrap_or(false)
+            });
+        }
+
+        if let Some(allowed_filter) = allowed {
+            events.retain(|e| {
+                e.get("allowed")
+                    .and_then(Value::as_bool)
+                    .map(|v| v == allowed_filter)
+                    .unwrap_or(false)
+            });
+        }
+
+        self.emit(
+            "audit_list",
+            json!({ "count": events.len(), "events": events }),
+            Some(
+                events
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            "{} | role={} | allowed={} | runtime={} | input={}",
+                            e.get("ts").and_then(Value::as_str).unwrap_or(""),
+                            e.get("role").and_then(Value::as_str).unwrap_or(""),
+                            e.get("allowed").and_then(Value::as_bool).unwrap_or(false),
+                            e.get("runtime").and_then(Value::as_str).unwrap_or(""),
+                            e.get("command_input").and_then(Value::as_str).unwrap_or(""),
+                        )
+                    })
                     .collect::<Vec<String>>()
                     .join("\n"),
             ),

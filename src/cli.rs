@@ -121,6 +121,15 @@ enum Commands {
         #[arg(long)]
         contains: Option<String>,
     },
+    /// Show security audit events (file/sqlite backend)
+    AuditList {
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+        #[arg(long)]
+        role: Option<String>,
+        #[arg(long)]
+        allowed: Option<bool>,
+    },
     /// Create a one-shot schedule at an RFC3339 UTC datetime
     ScheduleRunAt {
         #[arg(long)]
@@ -262,6 +271,11 @@ pub async fn run() -> Result<()> {
             level,
             contains,
         } => app.logs(&id, limit, level.as_deref(), contains.as_deref()),
+        Commands::AuditList {
+            limit,
+            role,
+            allowed,
+        } => app.audit_list(limit, role.as_deref(), allowed).await,
         Commands::ScheduleRunAt {
             name,
             prompt,

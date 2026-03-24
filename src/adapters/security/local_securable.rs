@@ -95,6 +95,55 @@ impl LocalSecurable {
 
         Ok(())
     }
+
+    fn list_file_audit(&self, limit: usize) -> Result<Vec<String>> {
+        if !self.audit_log_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = fs::read_to_string(&self.audit_log_path).with_context(|| {
+            format!(
+                "failed to read audit log file: {}",
+                self.audit_log_path.display()
+            )
+        })?;
+
+        let mut lines: Vec<String> = content
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| line.to_string())
+            .collect();
+        lines.reverse();
+        lines.truncate(limit);
+        Ok(lines)
+    }
+
+    fn list_sqlite_audit(&self, limit: usize) -> Result<Vec<String>> {
+        if !self.audit_log_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let conn = rusqlite::Connection::open(&self.audit_log_path).with_context(|| {
+            format!(
+                "failed to open sqlite audit DB: {}",
+                self.audit_log_path.display()
+            )
+        })?;
+
+        let mut stmt = conn
+            .prepare("SELECT payload FROM security_audit_logs ORDER BY id DESC LIMIT ?1")
+            .context("failed to prepare audit list query")?;
+
+        let rows = stmt
+            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .context("failed to query sqlite audit logs")?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
 }
 
 fn is_path_allowed(path: &Path, allowed_paths: &[String]) -> Result<bool> {
@@ -157,5 +206,13 @@ impl SecurablePort for LocalSecurable {
         }
 
         self.write_file_audit(payload)
+    }
+
+    async fn list_audit_events(&self, limit: usize) -> Result<Vec<String>> {
+        if self.audit_backend.eq_ignore_ascii_case("sqlite") {
+            return self.list_sqlite_audit(limit);
+        }
+
+        self.list_file_audit(limit)
     }
 }

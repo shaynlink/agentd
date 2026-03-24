@@ -177,6 +177,7 @@ Additional options for broader use-cases:
 
 - `list --state <state> --provider <provider> --limit <n> --ids-only --sort-by <created_at|state|provider>`
 - `logs --id <agent_id> --limit <n> --level <info|warn|error> --contains <text>`
+- `audit-list --limit <n> --role <admin|operator|viewer> --allowed <true|false>`
 
 Sandbox security/audit environment options:
 

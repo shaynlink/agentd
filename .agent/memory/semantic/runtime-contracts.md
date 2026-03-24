@@ -55,6 +55,7 @@ Behavior:
 	- `file` backend (JSON-lines file)
 	- `sqlite` backend (`security_audit_logs` table)
 	- configured via `AGENTD_SANDBOX_AUDIT_BACKEND` and `AGENTD_SANDBOX_AUDIT_LOG_PATH`
+- audit retrieval exposed through `SecurablePort::list_audit_events` and surfaced by CLI `audit-list`
 
 </section>
 
