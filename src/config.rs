@@ -8,7 +8,6 @@ use serde::Deserialize;
 pub struct AppConfig {
     pub default_provider: String,
     pub cli: CliProviderConfig,
-    pub vibe: CliProviderConfig,
     pub http: HttpProviderConfig,
     pub sandbox: SandboxProviderConfig,
 }
@@ -48,7 +47,6 @@ pub struct SandboxProviderConfig {
     pub allowed_write_paths: Vec<String>,
     pub trace_commands: bool,
     pub trace_diff: bool,
-    pub vibe_path: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -60,7 +58,6 @@ struct FileConfig {
 #[derive(Debug, Deserialize, Default)]
 struct FileProvidersConfig {
     cli: Option<FileCliProviderConfig>,
-    vibe: Option<FileCliProviderConfig>,
     http: Option<FileHttpProviderConfig>,
     sandbox: Option<FileSandboxProviderConfig>,
 }
@@ -100,7 +97,6 @@ struct FileSandboxProviderConfig {
     allowed_write_paths: Option<Vec<String>>,
     trace_commands: Option<bool>,
     trace_diff: Option<bool>,
-    vibe_path: Option<String>,
 }
 
 impl AppConfig {
@@ -109,7 +105,6 @@ impl AppConfig {
         let file_cfg = load_file_config(&cfg_path)?;
 
         let file_cli = file_cfg.providers.as_ref().and_then(|p| p.cli.as_ref());
-        let file_vibe = file_cfg.providers.as_ref().and_then(|p| p.vibe.as_ref());
         let file_http = file_cfg.providers.as_ref().and_then(|p| p.http.as_ref());
         let file_sandbox = file_cfg.providers.as_ref().and_then(|p| p.sandbox.as_ref());
 
@@ -173,65 +168,6 @@ impl AppConfig {
         let plan_output_format = env::var("AGENTD_CLI_PLAN_OUTPUT_FORMAT")
             .ok()
             .or_else(|| file_cli.and_then(|c| c.plan_output_format.clone()))
-            .unwrap_or_else(|| "yaml".to_string());
-
-        let vibe_command = env::var("AGENTD_VIBE_COMMAND")
-            .ok()
-            .or_else(|| file_vibe.and_then(|c| c.command.clone()))
-            .unwrap_or_else(|| "vibe".to_string());
-
-        let vibe_args = if let Ok(raw) = env::var("AGENTD_VIBE_ARGS_JSON") {
-            serde_json::from_str::<Vec<String>>(&raw)
-                .context("AGENTD_VIBE_ARGS_JSON must be a JSON string array")?
-        } else {
-            file_vibe
-                .and_then(|c| c.args.clone())
-                .unwrap_or_else(|| vec!["run".to_string()])
-        };
-
-        let vibe_prompt_mode = env::var("AGENTD_VIBE_PROMPT_MODE")
-            .ok()
-            .or_else(|| file_vibe.and_then(|c| c.prompt_mode.clone()))
-            .unwrap_or_else(|| "arg".to_string());
-
-        let vibe_prompt_flag = env::var("AGENTD_VIBE_PROMPT_FLAG")
-            .ok()
-            .or_else(|| file_vibe.and_then(|c| c.prompt_flag.clone()))
-            .unwrap_or_else(|| "--prompt".to_string());
-
-        let vibe_runtime_dir = env::var("AGENTD_VIBE_RUNTIME_DIR")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| file_vibe.and_then(|c| c.runtime_dir.clone()))
-            .unwrap_or_else(|| PathBuf::from("./.agentd/runtime"));
-
-        let vibe_plan_command = env::var("AGENTD_VIBE_PLAN_COMMAND")
-            .ok()
-            .or_else(|| file_vibe.and_then(|c| c.plan_command.clone()))
-            .unwrap_or_else(|| vibe_command.clone());
-
-        let vibe_plan_args = if let Ok(raw) = env::var("AGENTD_VIBE_PLAN_ARGS_JSON") {
-            serde_json::from_str::<Vec<String>>(&raw)
-                .context("AGENTD_VIBE_PLAN_ARGS_JSON must be a JSON string array")?
-        } else {
-            file_vibe
-                .and_then(|c| c.plan_args.clone())
-                .unwrap_or_else(|| vec!["plan".to_string(), "generate".to_string()])
-        };
-
-        let vibe_plan_goal_mode = env::var("AGENTD_VIBE_PLAN_GOAL_MODE")
-            .ok()
-            .or_else(|| file_vibe.and_then(|c| c.plan_goal_mode.clone()))
-            .unwrap_or_else(|| "arg".to_string());
-
-        let vibe_plan_goal_flag = env::var("AGENTD_VIBE_PLAN_GOAL_FLAG")
-            .ok()
-            .or_else(|| file_vibe.and_then(|c| c.plan_goal_flag.clone()))
-            .unwrap_or_else(|| "--goal".to_string());
-
-        let vibe_plan_output_format = env::var("AGENTD_VIBE_PLAN_OUTPUT_FORMAT")
-            .ok()
-            .or_else(|| file_vibe.and_then(|c| c.plan_output_format.clone()))
             .unwrap_or_else(|| "yaml".to_string());
 
         let endpoint = env::var("AGENTD_HTTP_ENDPOINT")
@@ -326,11 +262,6 @@ impl AppConfig {
             .or_else(|| file_sandbox.and_then(|s| s.trace_diff))
             .unwrap_or(true);
 
-        let vibe_path = env::var("AGENTD_SANDBOX_VIBE_PATH")
-            .ok()
-            .or_else(|| file_sandbox.and_then(|s| s.vibe_path.clone()))
-            .unwrap_or_else(|| "vibe".to_string());
-
         Ok(Self {
             default_provider,
             cli: CliProviderConfig {
@@ -344,18 +275,6 @@ impl AppConfig {
                 plan_goal_mode,
                 plan_goal_flag,
                 plan_output_format,
-            },
-            vibe: CliProviderConfig {
-                command: vibe_command,
-                args: vibe_args,
-                prompt_mode: vibe_prompt_mode,
-                prompt_flag: vibe_prompt_flag,
-                runtime_dir: vibe_runtime_dir,
-                plan_command: vibe_plan_command,
-                plan_args: vibe_plan_args,
-                plan_goal_mode: vibe_plan_goal_mode,
-                plan_goal_flag: vibe_plan_goal_flag,
-                plan_output_format: vibe_plan_output_format,
             },
             http: HttpProviderConfig {
                 endpoint,
@@ -375,7 +294,6 @@ impl AppConfig {
                 allowed_write_paths,
                 trace_commands,
                 trace_diff,
-                vibe_path,
             },
         })
     }

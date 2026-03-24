@@ -102,31 +102,6 @@ async fn generate_plan_case(plan_output_format: &str, goal: &str) -> String {
     serde_yaml::to_string(&plan).expect("serialize generated plan")
 }
 
-async fn run_vibe_case() -> String {
-    let _env = EnvGuard::set(&[
-        ("AGENTD_VIBE_COMMAND", "/bin/sh".to_string()),
-        (
-            "AGENTD_VIBE_ARGS_JSON",
-            "[\"-c\",\"printf 'vibe-out\\n'\"]".to_string(),
-        ),
-        ("AGENTD_VIBE_PROMPT_MODE", "stdin".to_string()),
-        ("AGENTD_VIBE_RUNTIME_DIR", temp_runtime_dir()),
-    ]);
-
-    let provider = CliProvider::new_vibe();
-    let req = ProviderRunRequest {
-        agent_id: Uuid::new_v4().to_string(),
-        prompt: "ignored".to_string(),
-        timeout_secs: 5,
-        stream_output: false,
-        json_lines: false,
-        runtime_override: None,
-    };
-
-    let result = provider.run_agent(req).await.expect("run vibe case");
-    result.output
-}
-
 #[tokio::test]
 async fn cli_provider_stream_text_mode_returns_combined_output() {
     let output = run_stream_case(false).await;
@@ -181,11 +156,3 @@ async fn cli_provider_generate_plan_from_json_output() {
     assert!(output.contains("id: step-1"), "unexpected output: {output}");
 }
 
-#[tokio::test]
-async fn vibe_provider_uses_vibe_env_configuration() {
-    let output = run_vibe_case().await;
-    assert!(
-        output.contains("vibe-out"),
-        "vibe provider output should be present: {output}"
-    );
-}

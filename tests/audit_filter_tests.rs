@@ -25,7 +25,6 @@ fn test_sandbox_config(audit_backend: &str, audit_log_path: PathBuf) -> SandboxP
         allowed_write_paths: Vec::new(),
         trace_commands: false,
         trace_diff: false,
-        vibe_path: "vibe".to_string(),
     }
 }
 

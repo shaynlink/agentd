@@ -1,14 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::time::Instant;
-
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::json;
-use tokio::process::Command;
 
 use crate::adapters::runtimes;
 use crate::adapters::security;
@@ -47,7 +43,7 @@ fn is_command_allowed(cmd: &str, allowed_commands: &[String]) -> bool {
             return true;
         }
 
-        // Wildcard match (e.g., "vibe *")
+        // Wildcard match (e.g., "git *")
         if allowed.ends_with('*') {
             let prefix = allowed.trim_end_matches('*').trim_end();
             if cmd.starts_with(prefix) {
@@ -183,49 +179,6 @@ fn compute_diff(
 // ============================================================================
 // Runtime Execution
 // ============================================================================
-
-async fn run_via_vibe(
-    vibe_path: &str,
-    agent_prompt: &str,
-    workdir: &Path,
-    timeout_secs: u64,
-) -> Result<(String, i32)> {
-    let mut command = Command::new(vibe_path);
-    command
-        .arg("run")
-        .arg("--prompt")
-        .arg(agent_prompt)
-        .current_dir(workdir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let start = Instant::now();
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(timeout_secs),
-        command.output(),
-    )
-    .await
-    .context("vibe execution timeout")?
-    .context("failed to execute vibe")?;
-
-    let _elapsed = start.elapsed().as_secs();
-    let stdout_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr_str = String::from_utf8_lossy(&output.stderr).trim().to_string();
-
-    let combined = if !stdout_str.is_empty() {
-        if !stderr_str.is_empty() {
-            format!("{}\n{}", stdout_str, stderr_str)
-        } else {
-            stdout_str
-        }
-    } else {
-        stderr_str
-    };
-
-    let code = output.status.code().unwrap_or(1);
-
-    Ok((combined, code))
-}
 
 async fn run_via_process(
     command_name: &str,
@@ -388,15 +341,6 @@ impl Provider for SandboxProvider {
 
         // Execute via selected runtime
         let (output, exit_code) = match resolved_runtime.runtime.as_str() {
-            "vibe" => {
-                run_via_vibe(
-                    &sandbox_cfg.vibe_path,
-                    prompt_trimmed,
-                    &agent_workdir,
-                    request.timeout_secs,
-                )
-                .await?
-            }
             "process" => {
                 // For process runtime, treat the prompt as command + args
                 let parts: Vec<&str> = prompt_trimmed.splitn(2, ' ').collect();

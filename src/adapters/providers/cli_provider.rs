@@ -9,31 +9,15 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, CliProviderConfig as AppCliProviderConfig};
 use crate::domain::plan::Plan;
 use crate::ports::provider::{Provider, ProviderRunRequest, ProviderRunResult};
 
-#[derive(Debug, Clone, Copy)]
-enum CliProviderProfile {
-    Cli,
-    Vibe,
-}
-
-pub struct CliProvider {
-    profile: CliProviderProfile,
-}
+pub struct CliProvider;
 
 impl CliProvider {
     pub fn new() -> Self {
-        Self {
-            profile: CliProviderProfile::Cli,
-        }
-    }
-
-    pub fn new_vibe() -> Self {
-        Self {
-            profile: CliProviderProfile::Vibe,
-        }
+        Self
     }
 }
 
@@ -88,24 +72,32 @@ struct CliProviderConfig {
 }
 
 impl CliProviderConfig {
-    fn load(profile: CliProviderProfile) -> Result<Self> {
+    fn load() -> Result<Self> {
         let cfg = AppConfig::load()?;
-        let cli_cfg = match profile {
-            CliProviderProfile::Cli => cfg.cli,
-            CliProviderProfile::Vibe => cfg.vibe,
-        };
+        let AppCliProviderConfig {
+            command,
+            args,
+            prompt_mode,
+            prompt_flag,
+            runtime_dir,
+            plan_command,
+            plan_args,
+            plan_goal_mode,
+            plan_goal_flag,
+            plan_output_format,
+        } = cfg.cli;
 
         Ok(Self {
-            command: cli_cfg.command,
-            args: cli_cfg.args,
-            prompt_mode: PromptMode::from_value(&cli_cfg.prompt_mode),
-            prompt_flag: cli_cfg.prompt_flag,
-            runtime_dir: cli_cfg.runtime_dir,
-            plan_command: cli_cfg.plan_command,
-            plan_args: cli_cfg.plan_args,
-            plan_goal_mode: PromptMode::from_value(&cli_cfg.plan_goal_mode),
-            plan_goal_flag: cli_cfg.plan_goal_flag,
-            plan_output_format: PlanOutputFormat::from_value(&cli_cfg.plan_output_format),
+            command,
+            args,
+            prompt_mode: PromptMode::from_value(&prompt_mode),
+            prompt_flag,
+            runtime_dir,
+            plan_command,
+            plan_args,
+            plan_goal_mode: PromptMode::from_value(&plan_goal_mode),
+            plan_goal_flag,
+            plan_output_format: PlanOutputFormat::from_value(&plan_output_format),
         })
     }
 
@@ -244,14 +236,11 @@ where
 #[async_trait]
 impl Provider for CliProvider {
     fn name(&self) -> &'static str {
-        match self.profile {
-            CliProviderProfile::Cli => "cli",
-            CliProviderProfile::Vibe => "vibe",
-        }
+        "cli"
     }
 
     async fn generate_plan(&self, goal: &str) -> Result<Plan> {
-        let cfg = CliProviderConfig::load(self.profile)?;
+        let cfg = CliProviderConfig::load()?;
         let raw = run_cli_capture_output(
             &cfg.plan_command,
             &cfg.plan_args,
@@ -273,7 +262,7 @@ impl Provider for CliProvider {
     }
 
     async fn run_agent(&self, request: ProviderRunRequest) -> Result<ProviderRunResult> {
-        let cfg = CliProviderConfig::load(self.profile)?;
+        let cfg = CliProviderConfig::load()?;
 
         let mut command = Command::new(&cfg.command);
         command.args(&cfg.args);
@@ -423,7 +412,7 @@ impl Provider for CliProvider {
     }
 
     async fn cancel(&self, agent_id: &str) -> Result<()> {
-        let cfg = CliProviderConfig::load(self.profile)?;
+        let cfg = CliProviderConfig::load()?;
         let pid_path = cfg.pid_path(agent_id);
         if !pid_path.exists() {
             return Ok(());

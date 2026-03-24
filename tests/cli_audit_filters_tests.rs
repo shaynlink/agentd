@@ -50,7 +50,6 @@ fn test_sandbox_config(audit_db_path: PathBuf) -> SandboxProviderConfig {
         allowed_write_paths: Vec::new(),
         trace_commands: false,
         trace_diff: false,
-        vibe_path: "vibe".to_string(),
     }
 }
 

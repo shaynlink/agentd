@@ -12,25 +12,13 @@ plan_goal_mode = "stdin"
 plan_goal_flag = "--goal"
 plan_output_format = "yaml"
 
-[providers.vibe]
-command = "vibe"
-args = ["run"]
-prompt_mode = "arg"
-prompt_flag = "--prompt"
-runtime_dir = "./.agentd/runtime"
-plan_command = "vibe"
-plan_args = ["plan", "generate"]
-plan_goal_mode = "arg"
-plan_goal_flag = "--goal"
-plan_output_format = "yaml"
-
 [providers.http]
 endpoint = "http://localhost:8080/run-agent"
 auth_mode = "none"
 api_key_header = "x-api-key"
 
 [providers.sandbox]
-# Sandbox runtime: "vibe", "process", or "docker"
+# Sandbox runtime: "process" or "docker"
 runtime = "process"
 # Working directory for sandboxed agents
 workdir = "./.agentd/sandbox"
@@ -44,5 +32,3 @@ allowed_write_paths = []
 trace_commands = true
 # Enable filesystem diff tracing (before/after snapshots)
 trace_diff = true
-# Path to vibe executable (used when runtime = "vibe")
-vibe_path = "vibe"

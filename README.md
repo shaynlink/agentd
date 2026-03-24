@@ -36,7 +36,6 @@ Core capabilities:
 | Provider `mock` | Implemented |
 | Provider `cli` | Implemented for agent execution and plan generation |
 | Provider `http` | Implemented for agent execution (`run_agent`) |
-| Provider `vibe` | Implemented as a dedicated CLI profile for Mistral Vibe |
 | Persistence | SQLite (`./.agentd/state.db` by default) |
 
 ## Prerequisites
@@ -86,18 +85,6 @@ args = []
 prompt_mode = "stdin"
 prompt_flag = "--prompt"
 runtime_dir = "./.agentd/runtime"
-
-[providers.vibe]
-command = "vibe"
-args = ["run"]
-prompt_mode = "arg"
-prompt_flag = "--prompt"
-runtime_dir = "./.agentd/runtime"
-plan_command = "vibe"
-plan_args = ["plan", "generate"]
-plan_goal_mode = "arg"
-plan_goal_flag = "--goal"
-plan_output_format = "yaml"
 
 [providers.http]
 endpoint = "http://localhost:8080/run-agent"
@@ -221,36 +208,12 @@ cargo run -- attach --id <AGENT_ID>
 Example (`plan-generate` with a dedicated CLI command):
 
 ```bash
-AGENTD_CLI_PLAN_COMMAND=vibe \
+AGENTD_CLI_PLAN_COMMAND=my-planner \
 AGENTD_CLI_PLAN_ARGS_JSON='["plan","generate"]' \
 AGENTD_CLI_PLAN_GOAL_MODE=arg \
 AGENTD_CLI_PLAN_GOAL_FLAG=--goal \
 AGENTD_CLI_PLAN_OUTPUT_FORMAT=yaml \
-cargo run -- plan-generate --provider vibe --goal "Préparer un rapport" --output ./plan.yaml
-```
-
-### Vibe Provider Configuration
-
-The `vibe` provider reads environment variables:
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `AGENTD_VIBE_COMMAND` | `vibe` | Executable used to run Vibe CLI |
-| `AGENTD_VIBE_ARGS_JSON` | `["run"]` | JSON array of CLI arguments used for `attach` |
-| `AGENTD_VIBE_PROMPT_MODE` | `arg` | Prompt transport mode: `stdin` or `arg` |
-| `AGENTD_VIBE_PROMPT_FLAG` | `--prompt` | Flag name used when mode is `arg` |
-| `AGENTD_VIBE_RUNTIME_DIR` | `./.agentd/runtime` | PID file directory used for cancellation |
-| `AGENTD_VIBE_PLAN_COMMAND` | value of `AGENTD_VIBE_COMMAND` | Executable used for `plan-generate` |
-| `AGENTD_VIBE_PLAN_ARGS_JSON` | `["plan","generate"]` | JSON array of args used for `plan-generate` |
-| `AGENTD_VIBE_PLAN_GOAL_MODE` | `arg` | Goal transport mode for `plan-generate`: `stdin` or `arg` |
-| `AGENTD_VIBE_PLAN_GOAL_FLAG` | `--goal` | Flag name used when `AGENTD_VIBE_PLAN_GOAL_MODE=arg` |
-| `AGENTD_VIBE_PLAN_OUTPUT_FORMAT` | `yaml` | Output format returned by planner CLI: `yaml` or `json` |
-
-Example:
-
-```bash
-cargo run -- plan-generate --provider vibe --goal "Préparer un rapport" --output ./plan.yaml
-cargo run -- spawn --name "mistral-task" --provider vibe --prompt "Résume ce code"
+cargo run -- plan-generate --provider cli --goal "Préparer un rapport" --output ./plan.yaml
 ```
 
 ### HTTP Provider Configuration
@@ -313,7 +276,7 @@ Step schema:
 - `name` (string, required)
 - `prompt` (string, required)
 - `provider` (string, optional)
-- `runtime` (string, optional): runtime override (`process`, `vibe`, etc.)
+- `runtime` (string, optional): runtime override (`process`, `docker`, etc.)
 - `depends_on` (string array, optional)
 - `timeout_secs` (u64, optional)
 - `retries` (u32, optional)
@@ -343,7 +306,7 @@ State transitions are enforced:
 
 ## Known Limitations
 
-- `plan-generate` is implemented by `mock` and `cli` (`vibe` alias).
+- `plan-generate` is implemented by `mock` and `cli`.
 - scheduler is implemented, but there is no always-on daemon loop in this MVP.
 
 Scheduler status:
