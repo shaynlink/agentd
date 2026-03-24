@@ -716,6 +716,26 @@ impl App {
         Ok(())
     }
 
+    pub async fn rbac_attach_policy(&self, role_name: &str, policy_name: &str) -> Result<()> {
+        let cfg = crate::config::AppConfig::load()?;
+        let securable = security::build_securable(&cfg.sandbox);
+        securable
+            .attach_policy_to_role(role_name, policy_name)
+            .await?;
+
+        self.emit(
+            "rbac_role_policy_attached",
+            json!({
+                "role": role_name,
+                "policy": policy_name,
+            }),
+            Some(format!(
+                "rbac policy attached: role={role_name} policy={policy_name}"
+            )),
+        );
+        Ok(())
+    }
+
     pub async fn rbac_list(&self) -> Result<()> {
         let cfg = crate::config::AppConfig::load()?;
         let securable = security::build_securable(&cfg.sandbox);

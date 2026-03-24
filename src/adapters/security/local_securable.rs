@@ -335,6 +335,15 @@ impl LocalSecurable {
         Ok(None)
     }
 
+    fn policy_id_by_name(&self, conn: &Connection, policy_name: &str) -> Result<Option<i64>> {
+        let mut stmt = conn.prepare("SELECT id FROM rbac_policies WHERE name = ?1")?;
+        let mut rows = stmt.query(params![policy_name])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(row.get::<_, i64>(0)?));
+        }
+        Ok(None)
+    }
+
     fn matches_pattern(pattern: &str, candidate: &str) -> bool {
         let pattern = pattern.to_ascii_lowercase();
         let candidate = candidate.to_ascii_lowercase();
@@ -921,6 +930,31 @@ impl SecurablePort for LocalSecurable {
             params![subject_type, subject, role_id],
         )
         .context("failed to bind RBAC role")?;
+
+        Ok(())
+    }
+
+    async fn attach_policy_to_role(&self, role_name: &str, policy_name: &str) -> Result<()> {
+        let role_name = role_name.trim();
+        let policy_name = policy_name.trim();
+
+        if role_name.is_empty() || policy_name.is_empty() {
+            anyhow::bail!("invalid role-policy attachment: role_name and policy_name are required");
+        }
+
+        let conn = self.ensure_sqlite_rbac_ready()?;
+        let Some(role_id) = self.role_id_by_name(&conn, role_name)? else {
+            anyhow::bail!("RBAC role not found: {role_name}");
+        };
+        let Some(policy_id) = self.policy_id_by_name(&conn, policy_name)? else {
+            anyhow::bail!("RBAC policy not found: {policy_name}");
+        };
+
+        conn.execute(
+            "INSERT OR IGNORE INTO rbac_role_policies (role_id, policy_id) VALUES (?1, ?2)",
+            params![role_id, policy_id],
+        )
+        .context("failed to attach RBAC policy to role")?;
 
         Ok(())
     }

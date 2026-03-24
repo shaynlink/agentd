@@ -116,6 +116,26 @@ fn cli_rbac_create_and_list_end_to_end() {
         stderr_text(&bind_role)
     );
 
+    let attach_policy = run_cli_with_env(
+        &[
+            "--db-path",
+            &db_path,
+            "--output",
+            "json",
+            "rbac-attach-policy",
+            "--role",
+            "deployer",
+            "--policy",
+            "deployer.command.execute.allow.deploy",
+        ],
+        &envs,
+    );
+    assert!(
+        attach_policy.status.success(),
+        "rbac-attach-policy should succeed, stderr: {}",
+        stderr_text(&attach_policy)
+    );
+
     let list = run_cli_with_env(
         &["--db-path", &db_path, "--output", "json", "rbac-list"],
         &envs,
@@ -144,6 +164,10 @@ fn cli_rbac_create_and_list_end_to_end() {
         .get("bindings")
         .and_then(Value::as_array)
         .expect("data.bindings should be an array");
+    let role_policies = data
+        .get("role_policies")
+        .and_then(Value::as_array)
+        .expect("data.role_policies should be an array");
 
     assert!(
         roles.iter().any(|r| {
@@ -173,6 +197,15 @@ fn cli_rbac_create_and_list_end_to_end() {
                 && b.get("role").and_then(Value::as_str) == Some("deployer")
         }),
         "expected custom binding in RBAC list"
+    );
+
+    assert!(
+        role_policies.iter().any(|rp| {
+            rp.get("role").and_then(Value::as_str) == Some("deployer")
+                && rp.get("policy").and_then(Value::as_str)
+                    == Some("deployer.command.execute.allow.deploy")
+        }),
+        "expected custom role-policy attachment in RBAC list"
     );
 }
 
@@ -215,6 +248,63 @@ fn cli_rbac_bind_unknown_role_returns_not_found() {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .contains("RBAC role not found"),
+        "unexpected error payload: {}",
+        stderr_text(&out)
+    );
+}
+
+#[test]
+fn cli_rbac_attach_unknown_policy_returns_not_found() {
+    let db_path = temp_db_path();
+    let audit_db_path = temp_path("rbac-attach-unknown-policy.db");
+    let audit_db_path_string = audit_db_path.to_string_lossy().to_string();
+    let envs = [
+        ("AGENTD_SANDBOX_AUDIT_BACKEND", "sqlite"),
+        (
+            "AGENTD_SANDBOX_AUDIT_LOG_PATH",
+            audit_db_path_string.as_str(),
+        ),
+    ];
+
+    let create_role = run_cli_with_env(
+        &[
+            "--db-path",
+            &db_path,
+            "rbac-create-role",
+            "--name",
+            "deployer",
+        ],
+        &envs,
+    );
+    assert!(create_role.status.success(), "rbac-create-role should succeed");
+
+    let out = run_cli_with_env(
+        &[
+            "--db-path",
+            &db_path,
+            "rbac-attach-policy",
+            "--role",
+            "deployer",
+            "--policy",
+            "missing.policy",
+        ],
+        &envs,
+    );
+    assert!(
+        !out.status.success(),
+        "rbac-attach-policy should fail on unknown policy"
+    );
+
+    let err: Value = serde_json::from_str(&stderr_text(&out)).expect("stderr should be JSON");
+    assert_eq!(
+        err.get("category").and_then(Value::as_str),
+        Some("not_found")
+    );
+    assert!(
+        err.get("message")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .contains("RBAC policy not found"),
         "unexpected error payload: {}",
         stderr_text(&out)
     );

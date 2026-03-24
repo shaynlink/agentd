@@ -167,6 +167,13 @@ enum Commands {
         #[arg(long)]
         role: String,
     },
+    /// Attach an RBAC policy to a role
+    RbacAttachPolicy {
+        #[arg(long)]
+        role: String,
+        #[arg(long)]
+        policy: String,
+    },
     /// List RBAC roles, policies, bindings and assignments
     RbacList,
     /// Create a one-shot schedule at an RFC3339 UTC datetime
@@ -356,6 +363,9 @@ pub async fn run() -> Result<()> {
             subject,
             role,
         } => app.rbac_bind_role(&subject_type, &subject, &role).await,
+        Commands::RbacAttachPolicy { role, policy } => {
+            app.rbac_attach_policy(&role, &policy).await
+        }
         Commands::RbacList => app.rbac_list().await,
         Commands::ScheduleRunAt {
             name,

@@ -75,5 +75,10 @@ pub trait SecurablePort: Send + Sync {
         subject: &str,
         role_name: &str,
     ) -> anyhow::Result<()>;
+    async fn attach_policy_to_role(
+        &self,
+        role_name: &str,
+        policy_name: &str,
+    ) -> anyhow::Result<()>;
     async fn list_rbac(&self) -> anyhow::Result<RbacSnapshot>;
 }
