@@ -5,6 +5,7 @@ use agentd::adapters::runtimes;
 use agentd::adapters::security::local_policy::LocalPolicyEngine;
 use agentd::adapters::security::local_workspace_guard::LocalWorkspaceGuard;
 use agentd::app::runtime_executor::RuntimeExecutor;
+use rusqlite::Connection;
 use uuid::Uuid;
 
 #[tokio::test]
@@ -105,4 +106,35 @@ async fn runtime_executor_writes_jsonl_events() {
     let raw = fs::read_to_string(&event_path).expect("read runtime event log");
     assert!(raw.contains("\"type\":\"command.executed\""));
     assert!(raw.contains("\"session_id\":\"sess_exec_4\""));
+}
+
+#[tokio::test]
+async fn runtime_executor_writes_sqlite_events() {
+    let workspace = std::env::current_dir().expect("get current dir");
+    let mut db_path = std::env::temp_dir();
+    db_path.push(format!("agentd-runtime-events-{}.db", Uuid::new_v4()));
+
+    let policy = Box::new(LocalPolicyEngine::new("full-trusted"));
+    let guard = Box::new(
+        LocalWorkspaceGuard::new(workspace.clone(), Vec::new(), Vec::new(), Vec::new())
+            .expect("create workspace guard"),
+    );
+    let runtime = runtimes::build_runtime("builtin").expect("build runtime");
+
+    let executor = RuntimeExecutor::new(policy, guard, runtime).with_event_db_path(db_path.clone());
+    executor
+        .execute_command("sess_exec_db", "echo", &["sqlite-event".to_string()], 5, &workspace)
+        .await
+        .expect("execute command with sqlite event logging");
+
+    let conn = Connection::open(&db_path).expect("open runtime event db");
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM runtime_events WHERE session_id = ?1 AND event_type = ?2",
+            ["sess_exec_db", "command.executed"],
+            |row| row.get(0),
+        )
+        .expect("count runtime events");
+
+    assert_eq!(count, 1, "expected one executed event in sqlite");
 }

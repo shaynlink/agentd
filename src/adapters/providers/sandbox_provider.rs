@@ -216,7 +216,13 @@ fn build_runtime_executor(
     let runtime = runtimes::build_runtime("builtin")?;
     let event_log_path = agent_workdir.join("runtime-events.jsonl");
 
-    Ok(RuntimeExecutor::new(policy, workspace_guard, runtime).with_event_log_path(event_log_path))
+    let mut executor = RuntimeExecutor::new(policy, workspace_guard, runtime)
+        .with_event_log_path(event_log_path);
+    if sandbox_cfg.audit_backend.eq_ignore_ascii_case("sqlite") {
+        executor = executor.with_event_db_path(sandbox_cfg.audit_log_path.clone());
+    }
+
+    Ok(executor)
 }
 
 // ============================================================================

@@ -4,6 +4,7 @@ use std::{fs, io::Write};
 
 use anyhow::{Result, bail};
 use chrono::Utc;
+use rusqlite::{Connection, params};
 use serde_json::json;
 
 use crate::domain::capability::Capability;
@@ -17,6 +18,7 @@ pub struct RuntimeExecutor {
     workspace_guard: Box<dyn WorkspaceGuardPort>,
     runtime: Box<dyn RuntimePort>,
     event_log_path: Option<PathBuf>,
+    event_db_path: Option<PathBuf>,
 }
 
 impl RuntimeExecutor {
@@ -30,6 +32,7 @@ impl RuntimeExecutor {
             workspace_guard,
             runtime,
             event_log_path: None,
+            event_db_path: None,
         }
     }
 
@@ -38,7 +41,12 @@ impl RuntimeExecutor {
         self
     }
 
-    fn append_runtime_event(&self, event: serde_json::Value) -> Result<()> {
+    pub fn with_event_db_path(mut self, event_db_path: PathBuf) -> Self {
+        self.event_db_path = Some(event_db_path);
+        self
+    }
+
+    fn append_runtime_event_jsonl(&self, event: &serde_json::Value) -> Result<()> {
         let Some(path) = self.event_log_path.as_ref() else {
             return Ok(());
         };
@@ -49,6 +57,77 @@ impl RuntimeExecutor {
 
         let mut file = fs::OpenOptions::new().create(true).append(true).open(path)?;
         writeln!(file, "{}", event)?;
+        Ok(())
+    }
+
+    fn append_runtime_event_sqlite(&self, event: &serde_json::Value) -> Result<()> {
+        let Some(path) = self.event_db_path.as_ref() else {
+            return Ok(());
+        };
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let conn = Connection::open(path)?;
+        conn.execute_batch(
+            r#"
+            CREATE TABLE IF NOT EXISTS runtime_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                command TEXT,
+                cwd TEXT,
+                exit_code INTEGER,
+                payload TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_runtime_events_session_id
+                ON runtime_events(session_id, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_runtime_events_ts
+                ON runtime_events(ts);
+            "#,
+        )?;
+
+        let ts = event
+            .get("ts")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let session_id = event
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let event_type = event
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let command = event
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string());
+        let cwd = event
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_string());
+        let exit_code = event.get("exit_code").and_then(|v| v.as_i64());
+        let payload = event.to_string();
+
+        conn.execute(
+            "INSERT INTO runtime_events (ts, session_id, event_type, command, cwd, exit_code, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![ts, session_id, event_type, command, cwd, exit_code, payload],
+        )?;
+
+        Ok(())
+    }
+
+    fn append_runtime_event(&self, event: serde_json::Value) -> Result<()> {
+        self.append_runtime_event_jsonl(&event)?;
+        self.append_runtime_event_sqlite(&event)?;
         Ok(())
     }
 
