@@ -16,6 +16,7 @@ use crate::domain::agent::{AgentRecord, AgentState};
 use crate::domain::plan::Plan;
 use crate::domain::schedule::{ScheduleRecord, ScheduleState};
 use crate::ports::provider::ProviderRunRequest;
+use crate::ports::securable::AuditEventFilters;
 use crate::ports::store::StateStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -585,93 +586,38 @@ impl App {
     pub async fn audit_list(&self, limit: usize, filters: AuditListFilters<'_>) -> Result<()> {
         let cfg = crate::config::AppConfig::load()?;
         let securable = security::build_securable(&cfg.sandbox);
-        let raw_events = securable.list_audit_events(limit).await?;
 
-        let since_dt = if let Some(s) = filters.since {
-            Some(
-                DateTime::parse_from_rfc3339(s)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .with_context(|| {
-                        format!("invalid --since timestamp (RFC3339 expected): {s}")
-                    })?,
-            )
-        } else {
-            None
-        };
+        if let Some(s) = filters.since {
+            DateTime::parse_from_rfc3339(s)
+                .map(|dt| dt.with_timezone(&Utc))
+                .with_context(|| format!("invalid --since timestamp (RFC3339 expected): {s}"))?;
+        }
 
-        let until_dt = if let Some(s) = filters.until {
-            Some(
-                DateTime::parse_from_rfc3339(s)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .with_context(|| {
-                        format!("invalid --until timestamp (RFC3339 expected): {s}")
-                    })?,
+        if let Some(s) = filters.until {
+            DateTime::parse_from_rfc3339(s)
+                .map(|dt| dt.with_timezone(&Utc))
+                .with_context(|| format!("invalid --until timestamp (RFC3339 expected): {s}"))?;
+        }
+
+        let raw_events = securable
+            .list_audit_events(
+                limit,
+                AuditEventFilters {
+                    role: filters.role,
+                    allowed: filters.allowed,
+                    runtime: filters.runtime,
+                    agent_id: filters.agent_id,
+                    since: filters.since,
+                    until: filters.until,
+                },
             )
-        } else {
-            None
-        };
+            .await?;
 
         let mut events = Vec::new();
         for payload in raw_events {
             if let Ok(v) = serde_json::from_str::<Value>(&payload) {
                 events.push(v);
             }
-        }
-
-        if let Some(role_filter) = filters.role {
-            events.retain(|e| {
-                e.get("role")
-                    .and_then(Value::as_str)
-                    .map(|r| r.eq_ignore_ascii_case(role_filter))
-                    .unwrap_or(false)
-            });
-        }
-
-        if let Some(allowed_filter) = filters.allowed {
-            events.retain(|e| {
-                e.get("allowed")
-                    .and_then(Value::as_bool)
-                    .map(|v| v == allowed_filter)
-                    .unwrap_or(false)
-            });
-        }
-
-        if let Some(runtime_filter) = filters.runtime {
-            events.retain(|e| {
-                e.get("runtime")
-                    .and_then(Value::as_str)
-                    .map(|r| r.eq_ignore_ascii_case(runtime_filter))
-                    .unwrap_or(false)
-            });
-        }
-
-        if let Some(agent_filter) = filters.agent_id {
-            events.retain(|e| {
-                e.get("agent_id")
-                    .and_then(Value::as_str)
-                    .map(|id| id == agent_filter)
-                    .unwrap_or(false)
-            });
-        }
-
-        if let Some(min_ts) = since_dt {
-            events.retain(|e| {
-                e.get("ts")
-                    .and_then(Value::as_str)
-                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                    .map(|dt| dt.with_timezone(&Utc) >= min_ts)
-                    .unwrap_or(false)
-            });
-        }
-
-        if let Some(max_ts) = until_dt {
-            events.retain(|e| {
-                e.get("ts")
-                    .and_then(Value::as_str)
-                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                    .map(|dt| dt.with_timezone(&Utc) <= max_ts)
-                    .unwrap_or(false)
-            });
         }
 
         self.emit(

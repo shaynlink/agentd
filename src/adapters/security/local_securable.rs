@@ -3,12 +3,14 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use rusqlite::params;
+use rusqlite::types::Value as SqlValue;
 use serde_json::Value;
 
 use crate::config::SandboxProviderConfig;
 use crate::domain::permission::RuntimeRole;
-use crate::ports::securable::SecurablePort;
+use crate::ports::securable::{AuditEventFilters, SecurablePort};
 
 pub struct LocalSecurable {
     allowed_read_paths: Vec<String>,
@@ -186,7 +188,92 @@ impl LocalSecurable {
         Ok(())
     }
 
-    fn list_file_audit(&self, limit: usize) -> Result<Vec<String>> {
+    fn payload_matches_filters(payload: &str, filters: AuditEventFilters<'_>) -> bool {
+        let parsed = match serde_json::from_str::<Value>(payload) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+
+        if let Some(role_filter) = filters.role {
+            let matches = parsed
+                .get("role")
+                .and_then(Value::as_str)
+                .map(|r| r.eq_ignore_ascii_case(role_filter))
+                .unwrap_or(false);
+            if !matches {
+                return false;
+            }
+        }
+
+        if let Some(allowed_filter) = filters.allowed {
+            let matches = parsed
+                .get("allowed")
+                .and_then(Value::as_bool)
+                .map(|v| v == allowed_filter)
+                .unwrap_or(false);
+            if !matches {
+                return false;
+            }
+        }
+
+        if let Some(runtime_filter) = filters.runtime {
+            let matches = parsed
+                .get("runtime")
+                .and_then(Value::as_str)
+                .map(|r| r.eq_ignore_ascii_case(runtime_filter))
+                .unwrap_or(false);
+            if !matches {
+                return false;
+            }
+        }
+
+        if let Some(agent_filter) = filters.agent_id {
+            let matches = parsed
+                .get("agent_id")
+                .and_then(Value::as_str)
+                .map(|id| id == agent_filter)
+                .unwrap_or(false);
+            if !matches {
+                return false;
+            }
+        }
+
+        if let Some(since_filter) = filters.since {
+            let since = match DateTime::parse_from_rfc3339(since_filter) {
+                Ok(ts) => ts.with_timezone(&Utc),
+                Err(_) => return false,
+            };
+            let matches = parsed
+                .get("ts")
+                .and_then(Value::as_str)
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Utc) >= since)
+                .unwrap_or(false);
+            if !matches {
+                return false;
+            }
+        }
+
+        if let Some(until_filter) = filters.until {
+            let until = match DateTime::parse_from_rfc3339(until_filter) {
+                Ok(ts) => ts.with_timezone(&Utc),
+                Err(_) => return false,
+            };
+            let matches = parsed
+                .get("ts")
+                .and_then(Value::as_str)
+                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.with_timezone(&Utc) <= until)
+                .unwrap_or(false);
+            if !matches {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    fn list_file_audit(&self, limit: usize, filters: AuditEventFilters<'_>) -> Result<Vec<String>> {
         if !self.audit_log_path.exists() {
             return Ok(Vec::new());
         }
@@ -201,6 +288,7 @@ impl LocalSecurable {
         let mut lines: Vec<String> = content
             .lines()
             .filter(|line| !line.trim().is_empty())
+            .filter(|line| Self::payload_matches_filters(line, filters))
             .map(|line| line.to_string())
             .collect();
         lines.reverse();
@@ -208,7 +296,11 @@ impl LocalSecurable {
         Ok(lines)
     }
 
-    fn list_sqlite_audit(&self, limit: usize) -> Result<Vec<String>> {
+    fn list_sqlite_audit(
+        &self,
+        limit: usize,
+        filters: AuditEventFilters<'_>,
+    ) -> Result<Vec<String>> {
         if !self.audit_log_path.exists() {
             return Ok(Vec::new());
         }
@@ -220,12 +312,51 @@ impl LocalSecurable {
             )
         })?;
 
+        let mut conditions: Vec<String> = Vec::new();
+        let mut bind_values: Vec<SqlValue> = Vec::new();
+
+        if let Some(role) = filters.role {
+            conditions.push("LOWER(role) = LOWER(?)".to_string());
+            bind_values.push(SqlValue::Text(role.to_string()));
+        }
+        if let Some(allowed) = filters.allowed {
+            conditions.push("allowed = ?".to_string());
+            bind_values.push(SqlValue::Integer(if allowed { 1 } else { 0 }));
+        }
+        if let Some(runtime) = filters.runtime {
+            conditions.push("LOWER(runtime) = LOWER(?)".to_string());
+            bind_values.push(SqlValue::Text(runtime.to_string()));
+        }
+        if let Some(agent_id) = filters.agent_id {
+            conditions.push("agent_id = ?".to_string());
+            bind_values.push(SqlValue::Text(agent_id.to_string()));
+        }
+        if let Some(since) = filters.since {
+            conditions.push("ts >= ?".to_string());
+            bind_values.push(SqlValue::Text(since.to_string()));
+        }
+        if let Some(until) = filters.until {
+            conditions.push("ts <= ?".to_string());
+            bind_values.push(SqlValue::Text(until.to_string()));
+        }
+
+        let mut query = "SELECT payload FROM security_audit_logs".to_string();
+        if !conditions.is_empty() {
+            query.push_str(" WHERE ");
+            query.push_str(&conditions.join(" AND "));
+        }
+        query.push_str(" ORDER BY ts DESC, id DESC LIMIT ?");
+
+        bind_values.push(SqlValue::Integer(limit as i64));
+
         let mut stmt = conn
-            .prepare("SELECT payload FROM security_audit_logs ORDER BY ts DESC, id DESC LIMIT ?1")
+            .prepare(&query)
             .context("failed to prepare audit list query")?;
 
         let rows = stmt
-            .query_map(params![limit as i64], |row| row.get::<_, String>(0))
+            .query_map(rusqlite::params_from_iter(bind_values), |row| {
+                row.get::<_, String>(0)
+            })
             .context("failed to query sqlite audit logs")?;
 
         let mut out = Vec::new();
@@ -298,11 +429,15 @@ impl SecurablePort for LocalSecurable {
         self.write_file_audit(payload)
     }
 
-    async fn list_audit_events(&self, limit: usize) -> Result<Vec<String>> {
+    async fn list_audit_events(
+        &self,
+        limit: usize,
+        filters: AuditEventFilters<'_>,
+    ) -> Result<Vec<String>> {
         if self.audit_backend.eq_ignore_ascii_case("sqlite") {
-            return self.list_sqlite_audit(limit);
+            return self.list_sqlite_audit(limit, filters);
         }
 
-        self.list_file_audit(limit)
+        self.list_file_audit(limit, filters)
     }
 }
