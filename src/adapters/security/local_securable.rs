@@ -10,7 +10,10 @@ use serde_json::Value;
 
 use crate::config::SandboxProviderConfig;
 use crate::domain::permission::RuntimeRole;
-use crate::ports::securable::{AuditEventFilters, SecurablePort};
+use crate::ports::securable::{
+    AuditEventFilters, RbacBindingRecord, RbacPolicyRecord, RbacPolicySpec, RbacRolePolicyRecord,
+    RbacRoleRecord, RbacSnapshot, SecurablePort,
+};
 
 pub struct LocalSecurable {
     allowed_commands: Vec<String>,
@@ -308,6 +311,28 @@ impl LocalSecurable {
         self.attach_policy_to_role(conn, viewer_role_id, viewer_cmd_deny)?;
 
         Ok(())
+    }
+
+    fn ensure_sqlite_rbac_ready(&self) -> Result<Connection> {
+        if !self.audit_backend.eq_ignore_ascii_case("sqlite") {
+            anyhow::bail!(
+                "RBAC management requires sqlite audit backend (set AGENTD_SANDBOX_AUDIT_BACKEND=sqlite)"
+            );
+        }
+
+        let conn = self.open_sqlite()?;
+        self.ensure_sqlite_rbac_schema(&conn)?;
+        self.ensure_default_rbac_seed(&conn)?;
+        Ok(conn)
+    }
+
+    fn role_id_by_name(&self, conn: &Connection, role_name: &str) -> Result<Option<i64>> {
+        let mut stmt = conn.prepare("SELECT id FROM rbac_roles WHERE LOWER(name) = LOWER(?1)")?;
+        let mut rows = stmt.query(params![role_name])?;
+        if let Some(row) = rows.next()? {
+            return Ok(Some(row.get::<_, i64>(0)?));
+        }
+        Ok(None)
     }
 
     fn matches_pattern(pattern: &str, candidate: &str) -> bool {
@@ -830,5 +855,166 @@ impl SecurablePort for LocalSecurable {
         }
 
         self.list_file_audit(limit, filters)
+    }
+
+    async fn create_role(&self, name: &str, description: Option<&str>) -> Result<()> {
+        let trimmed = name.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("invalid role name: empty");
+        }
+
+        let conn = self.ensure_sqlite_rbac_ready()?;
+        conn.execute(
+            "INSERT OR IGNORE INTO rbac_roles (name, description, is_builtin) VALUES (?1, ?2, 0)",
+            params![trimmed, description],
+        )
+        .context("failed to create RBAC role")?;
+
+        Ok(())
+    }
+
+    async fn create_policy(&self, spec: &RbacPolicySpec) -> Result<()> {
+        let name = spec.name.trim();
+        let resource_type = spec.resource_type.trim();
+        let action = spec.action.trim();
+        let resource_pattern = spec.resource_pattern.trim();
+        let effect = spec.effect.trim().to_ascii_lowercase();
+
+        if name.is_empty()
+            || resource_type.is_empty()
+            || action.is_empty()
+            || resource_pattern.is_empty()
+        {
+            anyhow::bail!("invalid policy: name/resource_type/action/resource_pattern are required");
+        }
+        if effect != "allow" && effect != "deny" {
+            anyhow::bail!("invalid policy effect: expected allow|deny");
+        }
+
+        let conn = self.ensure_sqlite_rbac_ready()?;
+        conn.execute(
+            "INSERT OR IGNORE INTO rbac_policies (name, resource_type, action, resource_pattern, effect)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![name, resource_type, action, resource_pattern, effect],
+        )
+        .context("failed to create RBAC policy")?;
+
+        Ok(())
+    }
+
+    async fn bind_role(&self, subject_type: &str, subject: &str, role_name: &str) -> Result<()> {
+        let subject_type = subject_type.trim();
+        let subject = subject.trim();
+        let role_name = role_name.trim();
+
+        if subject_type.is_empty() || subject.is_empty() || role_name.is_empty() {
+            anyhow::bail!("invalid binding: subject_type, subject and role_name are required");
+        }
+
+        let conn = self.ensure_sqlite_rbac_ready()?;
+        let Some(role_id) = self.role_id_by_name(&conn, role_name)? else {
+            anyhow::bail!("RBAC role not found: {role_name}");
+        };
+
+        conn.execute(
+            "INSERT OR IGNORE INTO rbac_bindings (subject_type, subject, role_id) VALUES (?1, ?2, ?3)",
+            params![subject_type, subject, role_id],
+        )
+        .context("failed to bind RBAC role")?;
+
+        Ok(())
+    }
+
+    async fn list_rbac(&self) -> Result<RbacSnapshot> {
+        let conn = self.ensure_sqlite_rbac_ready()?;
+
+        let roles = {
+            let mut stmt = conn.prepare(
+                "SELECT name, description, is_builtin FROM rbac_roles ORDER BY LOWER(name) ASC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(RbacRoleRecord {
+                    name: row.get(0)?,
+                    description: row.get(1)?,
+                    is_builtin: row.get::<_, i64>(2)? != 0,
+                })
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            out
+        };
+
+        let policies = {
+            let mut stmt = conn.prepare(
+                "SELECT name, resource_type, action, resource_pattern, effect
+                 FROM rbac_policies
+                 ORDER BY LOWER(name) ASC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(RbacPolicyRecord {
+                    name: row.get(0)?,
+                    resource_type: row.get(1)?,
+                    action: row.get(2)?,
+                    resource_pattern: row.get(3)?,
+                    effect: row.get(4)?,
+                })
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            out
+        };
+
+        let bindings = {
+            let mut stmt = conn.prepare(
+                "SELECT b.subject_type, b.subject, r.name
+                 FROM rbac_bindings b
+                 JOIN rbac_roles r ON r.id = b.role_id
+                 ORDER BY LOWER(b.subject_type), LOWER(b.subject), LOWER(r.name)",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(RbacBindingRecord {
+                    subject_type: row.get(0)?,
+                    subject: row.get(1)?,
+                    role: row.get(2)?,
+                })
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            out
+        };
+
+        let role_policies = {
+            let mut stmt = conn.prepare(
+                "SELECT r.name, p.name
+                 FROM rbac_role_policies rp
+                 JOIN rbac_roles r ON r.id = rp.role_id
+                 JOIN rbac_policies p ON p.id = rp.policy_id
+                 ORDER BY LOWER(r.name), LOWER(p.name)",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(RbacRolePolicyRecord {
+                    role: row.get(0)?,
+                    policy: row.get(1)?,
+                })
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            out
+        };
+
+        Ok(RbacSnapshot {
+            roles,
+            policies,
+            bindings,
+            role_policies,
+        })
     }
 }

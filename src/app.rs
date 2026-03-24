@@ -16,7 +16,7 @@ use crate::domain::agent::{AgentRecord, AgentState};
 use crate::domain::plan::Plan;
 use crate::domain::schedule::{ScheduleRecord, ScheduleState};
 use crate::ports::provider::ProviderRunRequest;
-use crate::ports::securable::AuditEventFilters;
+use crate::ports::securable::{AuditEventFilters, RbacPolicySpec};
 use crate::ports::store::StateStore;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -641,6 +641,106 @@ impl App {
             ),
         );
 
+        Ok(())
+    }
+
+    pub async fn rbac_create_role(&self, name: &str, description: Option<&str>) -> Result<()> {
+        let cfg = crate::config::AppConfig::load()?;
+        let securable = security::build_securable(&cfg.sandbox);
+        securable.create_role(name, description).await?;
+
+        self.emit(
+            "rbac_role_created",
+            json!({ "name": name, "description": description }),
+            Some(format!("rbac role created: {name}")),
+        );
+        Ok(())
+    }
+
+    pub async fn rbac_create_policy(
+        &self,
+        name: &str,
+        resource_type: &str,
+        action: &str,
+        resource_pattern: &str,
+        effect: &str,
+    ) -> Result<()> {
+        let cfg = crate::config::AppConfig::load()?;
+        let securable = security::build_securable(&cfg.sandbox);
+        let spec = RbacPolicySpec {
+            name: name.to_string(),
+            resource_type: resource_type.to_string(),
+            action: action.to_string(),
+            resource_pattern: resource_pattern.to_string(),
+            effect: effect.to_string(),
+        };
+        securable.create_policy(&spec).await?;
+
+        self.emit(
+            "rbac_policy_created",
+            json!({
+                "name": name,
+                "resource_type": resource_type,
+                "action": action,
+                "resource_pattern": resource_pattern,
+                "effect": effect,
+            }),
+            Some(format!(
+                "rbac policy created: {name} ({resource_type}:{action} {resource_pattern} => {effect})"
+            )),
+        );
+        Ok(())
+    }
+
+    pub async fn rbac_bind_role(
+        &self,
+        subject_type: &str,
+        subject: &str,
+        role_name: &str,
+    ) -> Result<()> {
+        let cfg = crate::config::AppConfig::load()?;
+        let securable = security::build_securable(&cfg.sandbox);
+        securable.bind_role(subject_type, subject, role_name).await?;
+
+        self.emit(
+            "rbac_binding_created",
+            json!({
+                "subject_type": subject_type,
+                "subject": subject,
+                "role": role_name,
+            }),
+            Some(format!(
+                "rbac binding created: {subject_type}:{subject} -> {role_name}"
+            )),
+        );
+        Ok(())
+    }
+
+    pub async fn rbac_list(&self) -> Result<()> {
+        let cfg = crate::config::AppConfig::load()?;
+        let securable = security::build_securable(&cfg.sandbox);
+        let snapshot = securable.list_rbac().await?;
+        let role_count = snapshot.roles.len();
+        let policy_count = snapshot.policies.len();
+        let binding_count = snapshot.bindings.len();
+        let role_policy_count = snapshot.role_policies.len();
+
+        self.emit(
+            "rbac_list",
+            json!({
+                "roles": snapshot.roles,
+                "policies": snapshot.policies,
+                "bindings": snapshot.bindings,
+                "role_policies": snapshot.role_policies,
+            }),
+            Some(format!(
+                "roles={} policies={} bindings={} role_policies={}",
+                role_count,
+                policy_count,
+                binding_count,
+                role_policy_count
+            )),
+        );
         Ok(())
     }
 

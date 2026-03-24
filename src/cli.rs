@@ -138,6 +138,37 @@ enum Commands {
         #[arg(long)]
         until: Option<String>,
     },
+    /// Create an RBAC role
+    RbacCreateRole {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Create an RBAC policy
+    RbacCreatePolicy {
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        resource_type: String,
+        #[arg(long)]
+        action: String,
+        #[arg(long)]
+        resource_pattern: String,
+        #[arg(long)]
+        effect: String,
+    },
+    /// Bind an RBAC role to a subject
+    RbacBindRole {
+        #[arg(long, default_value = "runtime_role")]
+        subject_type: String,
+        #[arg(long)]
+        subject: String,
+        #[arg(long)]
+        role: String,
+    },
+    /// List RBAC roles, policies, bindings and assignments
+    RbacList,
     /// Create a one-shot schedule at an RFC3339 UTC datetime
     ScheduleRunAt {
         #[arg(long)]
@@ -301,6 +332,31 @@ pub async fn run() -> Result<()> {
             )
             .await
         }
+        Commands::RbacCreateRole { name, description } => {
+            app.rbac_create_role(&name, description.as_deref()).await
+        }
+        Commands::RbacCreatePolicy {
+            name,
+            resource_type,
+            action,
+            resource_pattern,
+            effect,
+        } => {
+            app.rbac_create_policy(
+                &name,
+                &resource_type,
+                &action,
+                &resource_pattern,
+                &effect,
+            )
+            .await
+        }
+        Commands::RbacBindRole {
+            subject_type,
+            subject,
+            role,
+        } => app.rbac_bind_role(&subject_type, &subject, &role).await,
+        Commands::RbacList => app.rbac_list().await,
         Commands::ScheduleRunAt {
             name,
             prompt,
