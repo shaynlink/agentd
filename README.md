@@ -286,6 +286,7 @@ steps:
     name: analyze
     prompt: "Analyze objective"
     provider: mock
+    runtime: process
     depends_on: []
     timeout_secs: 5
     retries: 1
@@ -305,9 +306,16 @@ Step schema:
 - `name` (string, required)
 - `prompt` (string, required)
 - `provider` (string, optional)
+- `runtime` (string, optional): runtime override (`process`, `vibe`, etc.)
 - `depends_on` (string array, optional)
 - `timeout_secs` (u64, optional)
 - `retries` (u32, optional)
+
+Runtime selection precedence is:
+
+1. plan step `runtime`
+2. CLI runtime override (for example `attach --sandbox-runtime`)
+3. configuration file (`[providers.sandbox].runtime`)
 
 ## Agent State Model
 

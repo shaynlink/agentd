@@ -10,7 +10,9 @@ use chrono::Utc;
 use serde_json::json;
 use tokio::process::Command;
 
+use crate::adapters::runtimes;
 use crate::domain::plan::Plan;
+use crate::domain::runtime_config::RuntimeConfig;
 use crate::ports::provider::{Provider, ProviderRunRequest, ProviderRunResult};
 
 pub struct SandboxProvider;
@@ -72,20 +74,17 @@ fn is_path_allowed(path: &Path, allowed_paths: &[String]) -> Result<bool> {
 
     for allowed in allowed_paths {
         let allowed_path = PathBuf::from(allowed);
-        let allowed_canonical = fs::canonicalize(&allowed_path)
-            .or_else(|_| {
-                if let Some(parent) = allowed_path.parent() {
-                    fs::canonicalize(parent)
-                        .map(|p| p.join(allowed_path.file_name().unwrap_or_default()))
-                } else {
-                    fs::canonicalize(&allowed_path)
-                }
-            })?;
+        let allowed_canonical = fs::canonicalize(&allowed_path).or_else(|_| {
+            if let Some(parent) = allowed_path.parent() {
+                fs::canonicalize(parent)
+                    .map(|p| p.join(allowed_path.file_name().unwrap_or_default()))
+            } else {
+                fs::canonicalize(&allowed_path)
+            }
+        })?;
 
         // Check if canonical is under allowed_canonical or is identical
-        if canonical == allowed_canonical
-            || canonical.starts_with(&allowed_canonical)
-        {
+        if canonical == allowed_canonical || canonical.starts_with(&allowed_canonical) {
             return Ok(true);
         }
     }
@@ -232,40 +231,17 @@ async fn run_via_process(
     workdir: &Path,
     timeout_secs: u64,
 ) -> Result<(String, i32)> {
-    let mut command = Command::new(command_name);
-    command
-        .args(args)
-        .arg(agent_prompt)
-        .current_dir(workdir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let runtime = runtimes::build_runtime("builtin")?;
+    let mut full_args = args.to_vec();
+    if !agent_prompt.is_empty() {
+        full_args.push(agent_prompt.to_string());
+    }
 
-    let start = Instant::now();
-    let output = tokio::time::timeout(
-        std::time::Duration::from_secs(timeout_secs),
-        command.output(),
-    )
-    .await
-    .context("process execution timeout")?
-    .context("failed to execute process")?;
+    let result = runtime
+        .execute(command_name, &full_args, timeout_secs, workdir, None)
+        .await?;
 
-    let _elapsed = start.elapsed().as_secs();
-    let stdout_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let stderr_str = String::from_utf8_lossy(&output.stderr).trim().to_string();
-
-    let combined = if !stdout_str.is_empty() {
-        if !stderr_str.is_empty() {
-            format!("{}\n{}", stdout_str, stderr_str)
-        } else {
-            stdout_str
-        }
-    } else {
-        stderr_str
-    };
-
-    let code = output.status.code().unwrap_or(1);
-
-    Ok((combined, code))
+    Ok((result.output, result.exit_code))
 }
 
 // ============================================================================
@@ -308,8 +284,7 @@ impl Provider for SandboxProvider {
 
         // Create agent-specific workdir
         let agent_workdir = sandbox_cfg.workdir.join(&request.agent_id);
-        fs::create_dir_all(&agent_workdir)
-            .context("failed to create agent workdir")?;
+        fs::create_dir_all(&agent_workdir).context("failed to create agent workdir")?;
 
         // Validate read paths
         for read_path in &sandbox_cfg.allowed_read_paths {
@@ -334,8 +309,14 @@ impl Provider for SandboxProvider {
             HashMap::new()
         };
 
+        let resolved_runtime = RuntimeConfig::resolve(
+            None,
+            request.runtime_override.as_deref(),
+            sandbox_cfg.runtime.as_str(),
+        );
+
         // Execute via selected runtime
-        let (output, exit_code) = match sandbox_cfg.runtime.as_str() {
+        let (output, exit_code) = match resolved_runtime.runtime.as_str() {
             "vibe" => {
                 run_via_vibe(
                     &sandbox_cfg.vibe_path,
@@ -381,7 +362,7 @@ impl Provider for SandboxProvider {
                 "agent_id": request.agent_id,
                 "command": prompt_trimmed,
                 "exit_code": exit_code,
-                "runtime": sandbox_cfg.runtime,
+                "runtime": resolved_runtime.runtime,
                 "workdir": agent_workdir.display().to_string(),
                 "diff": if sandbox_cfg.trace_diff { diff } else { json!(null) },
             })

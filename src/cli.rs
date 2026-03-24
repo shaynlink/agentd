@@ -211,8 +211,15 @@ pub async fn run() -> Result<()> {
             retries,
         } => {
             let provider = provider.unwrap_or_else(|| default_provider.clone());
-            app.spawn(&name, &provider, &prompt, timeout_secs, retries, sandbox_runtime)
-                .await
+            app.spawn(
+                &name,
+                &provider,
+                &prompt,
+                timeout_secs,
+                retries,
+                sandbox_runtime,
+            )
+            .await
         }
         Commands::Attach {
             id,
@@ -222,8 +229,15 @@ pub async fn run() -> Result<()> {
             json_lines,
             sandbox_runtime,
         } => {
-            app.attach(&id, timeout_secs, retries, stream, json_lines, sandbox_runtime)
-                .await
+            app.attach(
+                &id,
+                timeout_secs,
+                retries,
+                stream,
+                json_lines,
+                sandbox_runtime,
+            )
+            .await
         }
         Commands::List {
             state,
@@ -231,7 +245,13 @@ pub async fn run() -> Result<()> {
             limit,
             ids_only,
             sort_by,
-        } => app.list(state.as_deref(), provider.as_deref(), limit, ids_only, sort_by.as_deref()),
+        } => app.list(
+            state.as_deref(),
+            provider.as_deref(),
+            limit,
+            ids_only,
+            sort_by.as_deref(),
+        ),
         Commands::Pause { id } => app.pause(&id),
         Commands::Resume { id } => app.resume(&id),
         Commands::Stop { id } => app.stop(&id).await,
@@ -255,7 +275,15 @@ pub async fn run() -> Result<()> {
             let run_at = DateTime::parse_from_rfc3339(&run_at)
                 .map(|dt| dt.with_timezone(&Utc))
                 .map_err(|e| anyhow::anyhow!("invalid run_at (expected RFC3339): {e}"))?;
-            app.schedule_run_at(&name, &provider, &prompt, run_at, timeout_secs, retries, sandbox_runtime)
+            app.schedule_run_at(
+                &name,
+                &provider,
+                &prompt,
+                run_at,
+                timeout_secs,
+                retries,
+                sandbox_runtime,
+            )
         }
         Commands::ScheduleList { limit } => app.list_schedules(limit),
         Commands::ScheduleCron {
@@ -268,7 +296,15 @@ pub async fn run() -> Result<()> {
             retries,
         } => {
             let provider = provider.unwrap_or_else(|| default_provider.clone());
-            app.schedule_cron(&name, &provider, &prompt, &cron, timeout_secs, retries, sandbox_runtime)
+            app.schedule_cron(
+                &name,
+                &provider,
+                &prompt,
+                &cron,
+                timeout_secs,
+                retries,
+                sandbox_runtime,
+            )
         }
         Commands::ScheduleDispatchDue { limit } => app.dispatch_due_schedules(limit).await,
     }

@@ -13,6 +13,8 @@ pub struct PlanStep {
     pub prompt: String,
     pub provider: Option<String>,
     #[serde(default)]
+    pub runtime: Option<String>,
+    #[serde(default)]
     pub depends_on: Vec<String>,
     #[serde(default)]
     pub timeout_secs: Option<u64>,

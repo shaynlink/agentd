@@ -112,12 +112,23 @@ impl App {
                         for agent in agents {
                             let id = agent.get("id").and_then(|v| v.as_str()).unwrap_or("");
                             let name = agent.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                            let provider = agent.get("provider").and_then(|v| v.as_str()).unwrap_or("");
+                            let provider =
+                                agent.get("provider").and_then(|v| v.as_str()).unwrap_or("");
                             let state = agent.get("state").and_then(|v| v.as_str()).unwrap_or("");
-                            let attempts = agent.get("attempts").and_then(|v| v.as_u64()).unwrap_or(0);
-                            let created_at = agent.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
-                            let updated_at = agent.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
-                            println!("{}\t{}\t{}\t{}\t{}\t{}\t{}", id, name, provider, state, attempts, created_at, updated_at);
+                            let attempts =
+                                agent.get("attempts").and_then(|v| v.as_u64()).unwrap_or(0);
+                            let created_at = agent
+                                .get("created_at")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            let updated_at = agent
+                                .get("updated_at")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("");
+                            println!(
+                                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                                id, name, provider, state, attempts, created_at, updated_at
+                            );
                         }
                     }
                 } else if event == "agent_ids" {
@@ -205,7 +216,7 @@ impl App {
                 &step.prompt,
                 step.timeout_secs.unwrap_or(60),
                 step.retries.unwrap_or(0),
-                None,
+                step.runtime,
             )
             .await?;
         }
@@ -247,7 +258,9 @@ impl App {
                 "timeout_secs": timeout_secs,
                 "retries": retries,
             }),
-            Some(format!("default policy timeout={timeout_secs}s retries={retries}")),
+            Some(format!(
+                "default policy timeout={timeout_secs}s retries={retries}"
+            )),
         );
 
         Ok(())
@@ -283,15 +296,6 @@ impl App {
             return Err(err);
         }
 
-        // Set sandbox runtime override if provided
-        if let Some(runtime) = sandbox_runtime {
-            // SAFETY: set_var is unsafe because it involves global mutable state.
-            // We use it here to override the sandbox runtime for a single agent execution.
-            unsafe {
-                std::env::set_var("AGENTD_SANDBOX_RUNTIME", &runtime);
-            }
-        }
-
         let mut attempt = 0;
         loop {
             attempt += 1;
@@ -310,6 +314,7 @@ impl App {
                 timeout_secs,
                 stream_output,
                 json_lines,
+                runtime_override: sandbox_runtime.clone(),
             };
 
             let result = timeout(Duration::from_secs(timeout_secs), provider.run_agent(req)).await;
@@ -427,7 +432,8 @@ impl App {
             return Ok(());
         }
 
-        let agents_json = serde_json::to_value(&agents).context("failed to serialize agent list")?;
+        let agents_json =
+            serde_json::to_value(&agents).context("failed to serialize agent list")?;
         self.emit(
             "agent_list",
             json!({
@@ -437,14 +443,16 @@ impl App {
             Some(
                 agents
                     .iter()
-                    .map(|a| format!(
-                        "{} | {} | {} | {} | attempts={}",
-                        a.id,
-                        a.name,
-                        a.provider,
-                        a.state.as_str(),
-                        a.attempts
-                    ))
+                    .map(|a| {
+                        format!(
+                            "{} | {} | {} | {} | attempts={}",
+                            a.id,
+                            a.name,
+                            a.provider,
+                            a.state.as_str(),
+                            a.attempts
+                        )
+                    })
                     .collect::<Vec<String>>()
                     .join("\n"),
             ),
@@ -510,7 +518,8 @@ impl App {
 
     pub fn status(&self, agent_id: &str) -> Result<()> {
         if let Some(agent) = self.store.get_agent(agent_id)? {
-            let agent_json = serde_json::to_value(&agent).context("failed to serialize agent status")?;
+            let agent_json =
+                serde_json::to_value(&agent).context("failed to serialize agent status")?;
             self.emit(
                 "agent_status",
                 json!({ "agent": agent_json }),
@@ -552,8 +561,7 @@ impl App {
             "agent_logs",
             json!({ "agent_id": agent_id, "count": logs.len(), "logs": logs_json }),
             Some(
-                logs
-                    .iter()
+                logs.iter()
                     .map(|log| format!("{} [{}] {}", log.ts, log.level, log.message))
                     .collect::<Vec<String>>()
                     .join("\n"),
@@ -590,7 +598,8 @@ impl App {
         };
 
         self.store.create_schedule(&schedule)?;
-        let schedule_json = serde_json::to_value(&schedule).context("failed to serialize schedule")?;
+        let schedule_json =
+            serde_json::to_value(&schedule).context("failed to serialize schedule")?;
         self.emit(
             "schedule_created",
             json!({ "schedule": schedule_json, "mode": "run_at" }),
@@ -636,7 +645,8 @@ impl App {
         };
 
         self.store.create_schedule(&record)?;
-        let schedule_json = serde_json::to_value(&record).context("failed to serialize schedule")?;
+        let schedule_json =
+            serde_json::to_value(&record).context("failed to serialize schedule")?;
         self.emit(
             "schedule_created",
             json!({ "schedule": schedule_json, "mode": "cron" }),
@@ -659,7 +669,8 @@ impl App {
             return Ok(());
         }
 
-        let schedules_json = serde_json::to_value(&schedules).context("failed to serialize schedules")?;
+        let schedules_json =
+            serde_json::to_value(&schedules).context("failed to serialize schedules")?;
         self.emit(
             "schedule_list",
             json!({ "count": schedules.len(), "schedules": schedules_json }),
@@ -754,7 +765,10 @@ impl App {
                             "status": "succeeded",
                             "agent_id": agent_id,
                         }),
-                        Some(format!("schedule {} succeeded (agent_id={})", schedule.id, agent_id)),
+                        Some(format!(
+                            "schedule {} succeeded (agent_id={})",
+                            schedule.id, agent_id
+                        )),
                     );
                 }
                 Err(err) => {

@@ -17,7 +17,7 @@ Contract:
   - `run_agent(request)`
   - `cancel(agent_id)` (default no-op)
 - run request fields:
-  - `agent_id`, `prompt`, `timeout_secs`, `stream_output`, `json_lines`
+  - `agent_id`, `prompt`, `timeout_secs`, `stream_output`, `json_lines`, `runtime_override`
 - run result:
   - `output` string
 

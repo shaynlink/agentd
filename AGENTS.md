@@ -43,14 +43,24 @@ src/
   domain/
     agent.rs                   -> Agent lifecycle and entity logic
     plan.rs                    -> Plan structures and execution model
+    runtime_config.rs          -> Runtime precedence resolution
+    process_handle.rs          -> Process lifecycle handles
+    resource_limit.rs          -> Resource limits and usage models
   ports/
     provider.rs                -> Provider port abstraction
     store.rs                   -> Persistence port abstraction
+    runtime.rs                 -> Runtime execution port abstraction
+    process.rs                 -> Process control port abstraction
+    resource.rs                -> Resource metrics/limits port abstraction
   adapters/
     providers/
       mock.rs                  -> In-memory/mock provider (working)
-      cli_provider.rs          -> Local CLI provider (WIP)
-      http_provider.rs         -> Remote HTTP provider (WIP)
+      cli_provider.rs          -> Local CLI provider
+      http_provider.rs         -> Remote HTTP provider
+      sandbox_provider.rs      -> Controlled execution provider
+    runtimes/
+      builtin.rs               -> Built-in process runtime adapter
+      mod.rs                   -> Runtime adapter factory
     store/
       sqlite.rs                -> SQLite adapter for agents/logs
 docs/
@@ -124,6 +134,8 @@ Load the appropriate **role** from `.agent/roles/` and the relevant **context ma
 
 - `rust-orchestrator.md` — default role for Rust architecture, ports/adapters, and provider execution paths.
 - `technical-documentation-writer.md` — writes clear, structured, and easy-to-follow technical documentation.
+- `runtime-platform-engineer.md` — runtime architecture, adapter boundaries, and execution lifecycle.
+- `security-permissions-architect.md` — ACL/RBAC boundaries, permission checks, and auditability.
 
 ---
 
@@ -133,9 +145,14 @@ Load the appropriate **role** from `.agent/roles/` and the relevant **context ma
 | --- | --- | --- | --- |
 | "implémente provider cli", "stdin/stdout", "spawn process" | `01-rust-and-cli-standards.md` | `rust-orchestrator.md` | `codebase-overview.md#provider-layer` |
 | "implémente provider http", "endpoint", "bearer" | `01-rust-and-cli-standards.md` | `rust-orchestrator.md` | `codebase-overview.md#provider-layer` |
+| "runtime", "adapter runtime", "spawn", "kill process" | `03-runtime-adapter-standards.md` | `runtime-platform-engineer.md` | `runtime-contracts.md#runtime-ports` |
+| "resource limit", "cpu", "memory", "wall time" | `03-runtime-adapter-standards.md` | `runtime-platform-engineer.md` | `runtime-contracts.md#builtin-runtime-adapter` |
 | "sqlite", "migration", "store", "state" | `01-rust-and-cli-standards.md` | `rust-orchestrator.md` | `codebase-overview.md#persistence-layer` |
 | "commande cli", "clap", "subcommand" | `01-rust-and-cli-standards.md` | `rust-orchestrator.md` | `codebase-overview.md#cli-surface` |
 | "plan", "run-plan", "plan-generate" | `01-rust-and-cli-standards.md` | `rust-orchestrator.md` | `codebase-overview.md#application-flow` |
+| "acl", "rbac", "permission", "access" | `04-security-permissions-standards.md` | `security-permissions-architect.md` | `runtime-contracts.md#sandbox-integration` |
+| "diff", "rollback", "branch", "merge" | `23-runtime-versioning-gitlike.md` | `runtime-platform-engineer.md` | `runtime-contracts.md#runtime-precedence` |
+| "shell", "zsh", "bash", "inject shell", "replicate host shell" | `24-shell-injection-and-replication.md` | `runtime-platform-engineer.md` | `runtime-contracts.md#runtime-ports` |
 | "retry", "timeout", "attempts", "timed_out" | `21-retry-timeout-strategy.md` | `rust-orchestrator.md` | `provider-contracts.md#provider-port` |
 | "execution lock", "duplicate attach", "idempotence" | `20-execution-policy.md` | `rust-orchestrator.md` | `sqlite-schema.md#execution-locks` |
 | "schedule", "cron", "dispatch-due", "run-at" | `20-execution-policy.md` | `rust-orchestrator.md` | `domain-models.md#schedule-entity` |

@@ -72,6 +72,7 @@ async fn run_stream_case(json_lines: bool) -> String {
         timeout_secs: 5,
         stream_output: true,
         json_lines,
+        runtime_override: None,
     };
 
     let result = provider.run_agent(req).await.expect("run stream case");
@@ -118,6 +119,7 @@ async fn run_vibe_case() -> String {
         timeout_secs: 5,
         stream_output: false,
         json_lines: false,
+        runtime_override: None,
     };
 
     let result = provider.run_agent(req).await.expect("run vibe case");

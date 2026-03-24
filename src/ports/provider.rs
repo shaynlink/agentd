@@ -9,6 +9,7 @@ pub struct ProviderRunRequest {
     pub timeout_secs: u64,
     pub stream_output: bool,
     pub json_lines: bool,
+    pub runtime_override: Option<String>,
 }
 
 #[derive(Debug, Clone)]

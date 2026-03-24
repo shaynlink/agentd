@@ -2,13 +2,20 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use agentd::adapters::store::sqlite::SqliteStore;
-use agentd::app::App;
+use agentd::app::{App, OutputMode, OutputOptions};
 use agentd::domain::agent::AgentState;
 use agentd::ports::store::StateStore;
 use serde_json::Value;
 use uuid::Uuid;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn test_output_options() -> OutputOptions {
+    OutputOptions {
+        mode: OutputMode::Text,
+        quiet: true,
+    }
+}
 
 fn temp_db_path() -> String {
     let mut path = PathBuf::from(std::env::temp_dir());
@@ -74,7 +81,7 @@ async fn attach_retries_and_fails_on_provider_error() {
     ]);
 
     let db_path = temp_db_path();
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     app.spawn("failing", "cli", "ignored", 2, 2, None)
         .await
@@ -135,7 +142,7 @@ async fn attach_retries_and_times_out() {
     ]);
 
     let db_path = temp_db_path();
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     app.spawn("timeout", "cli", "ignored", 1, 1, None)
         .await

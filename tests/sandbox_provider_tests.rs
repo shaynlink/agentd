@@ -1,14 +1,21 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use agentd::adapters::store::sqlite::SqliteStore;
-use agentd::app::App;
+use agentd::app::{App, OutputMode, OutputOptions};
 use agentd::domain::agent::AgentState;
 use agentd::ports::store::StateStore;
 use uuid::Uuid;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+fn test_output_options() -> OutputOptions {
+    OutputOptions {
+        mode: OutputMode::Text,
+        quiet: true,
+    }
+}
 
 fn temp_db_path() -> String {
     let mut path = PathBuf::from(std::env::temp_dir());
@@ -23,12 +30,13 @@ fn temp_sandbox_dir() -> String {
 }
 
 struct EnvGuard {
+    _guard: MutexGuard<'static, ()>,
     entries: Vec<(String, Option<String>)>,
 }
 
 impl EnvGuard {
     fn set(entries: &[(&str, String)]) -> Self {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let guard = ENV_LOCK.lock().unwrap();
         let mut saved = Vec::new();
         for (key, value) in entries {
             let old = std::env::var(key).ok();
@@ -39,7 +47,10 @@ impl EnvGuard {
             }
             saved.push((key.to_string(), old));
         }
-        Self { entries: saved }
+        Self {
+            _guard: guard,
+            entries: saved,
+        }
     }
 }
 
@@ -73,15 +84,18 @@ async fn sandbox_provider_rejects_disallowed_command() {
     let _env = EnvGuard::set(&[
         ("AGENTD_SANDBOX_RUNTIME", "process".to_string()),
         ("AGENTD_SANDBOX_WORKDIR", sandbox_dir.clone()),
-        ("AGENTD_SANDBOX_ALLOWED_COMMANDS_JSON", r#"["echo", "cat"]"#.to_string()),
+        (
+            "AGENTD_SANDBOX_ALLOWED_COMMANDS_JSON",
+            r#"["echo", "cat"]"#.to_string(),
+        ),
         ("AGENTD_SANDBOX_TRACE_COMMANDS", "true".to_string()),
         ("AGENTD_SANDBOX_TRACE_DIFF", "true".to_string()),
     ]);
 
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     // Try to spawn with disallowed command "ls" (not in ["echo", "cat"])
-   app.spawn("denied_cmd", "sandbox", "ls /tmp", 5, 0, None)
+    app.spawn("denied_cmd", "sandbox", "ls /tmp", 5, 0, None)
         .await
         .expect("spawn agent with disallowed command");
 
@@ -99,7 +113,8 @@ async fn sandbox_provider_rejects_disallowed_command() {
     let err_msg = err.to_string();
     assert!(
         err_msg.contains("command not allowed") || err_msg.contains("not in allowed_commands"),
-        "expected ACL rejection, got: {}", err_msg
+        "expected ACL rejection, got: {}",
+        err_msg
     );
 
     // Verify agent failed
@@ -115,12 +130,15 @@ async fn sandbox_provider_allows_whitelisted_command() {
     let _env = EnvGuard::set(&[
         ("AGENTD_SANDBOX_RUNTIME", "process".to_string()),
         ("AGENTD_SANDBOX_WORKDIR", sandbox_dir.clone()),
-        ("AGENTD_SANDBOX_ALLOWED_COMMANDS_JSON", r#"["echo"]"#.to_string()),
+        (
+            "AGENTD_SANDBOX_ALLOWED_COMMANDS_JSON",
+            r#"["echo"]"#.to_string(),
+        ),
         ("AGENTD_SANDBOX_TRACE_COMMANDS", "true".to_string()),
         ("AGENTD_SANDBOX_TRACE_DIFF", "false".to_string()),
     ]);
 
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     app.spawn("allowed_cmd", "sandbox", "echo hello", 5, 0, None)
         .await
@@ -160,12 +178,19 @@ async fn sandbox_provider_captures_filesystem_diff() {
         ("AGENTD_SANDBOX_TRACE_DIFF", "true".to_string()),
     ]);
 
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     // Command that creates a file
-    app.spawn("create_file", "sandbox", "echo test > output.txt", 5, 0, None)
-        .await
-        .expect("spawn agent");
+    app.spawn(
+        "create_file",
+        "sandbox",
+        "echo test > output.txt",
+        5,
+        0,
+        None,
+    )
+    .await
+    .expect("spawn agent");
 
     let store = SqliteStore::new(db_path);
     let agents = store.list_agents().expect("list agents");
@@ -183,7 +208,7 @@ async fn sandbox_provider_captures_filesystem_diff() {
     let output_logs: Vec<_> = logs
         .iter()
         .filter(|log| {
-            // Look for tracing output containing escaped diff field 
+            // Look for tracing output containing escaped diff field
             // In the embedded JSON string, backslashes are escaped, so we look for \\\"diff\\\":
             log.message.contains(",\\\"diff\\\":")
         })
@@ -199,8 +224,7 @@ async fn sandbox_provider_captures_filesystem_diff() {
     if let Some(log) = output_logs.first() {
         let message = &log.message;
         assert!(
-            message.contains("\\\"created\\\"")
-                && message.contains("\\\"deleted\\\""),
+            message.contains("\\\"created\\\"") && message.contains("\\\"deleted\\\""),
             "expected diff sub-fields in tracing"
         );
     }
@@ -219,7 +243,7 @@ async fn sandbox_provider_empty_acl_allows_all_commands() {
         ("AGENTD_SANDBOX_TRACE_DIFF", "false".to_string()),
     ]);
 
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     // Simple echo command should be allowed when ACL is empty
     app.spawn("echo_cmd", "sandbox", "echo hello", 5, 0, None)
@@ -251,12 +275,15 @@ async fn sandbox_provider_wildcard_command_acl() {
     let _env = EnvGuard::set(&[
         ("AGENTD_SANDBOX_RUNTIME", "process".to_string()),
         ("AGENTD_SANDBOX_WORKDIR", sandbox_dir.clone()),
-        ("AGENTD_SANDBOX_ALLOWED_COMMANDS_JSON", r#"["echo *"]"#.to_string()),
+        (
+            "AGENTD_SANDBOX_ALLOWED_COMMANDS_JSON",
+            r#"["echo *"]"#.to_string(),
+        ),
         ("AGENTD_SANDBOX_TRACE_COMMANDS", "true".to_string()),
         ("AGENTD_SANDBOX_TRACE_DIFF", "false".to_string()),
     ]);
 
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     // "echo" with any args should be allowed
     app.spawn("echo_test", "sandbox", "echo hello world", 5, 0, None)
@@ -280,7 +307,12 @@ async fn sandbox_provider_wildcard_command_acl() {
         .expect("spawn rm agent");
 
     let agents = store.list_agents().expect("list agents");
-    let agent_id = agents.iter().find(|a| a.name == "rm_test").unwrap().id.clone();
+    let agent_id = agents
+        .iter()
+        .find(|a| a.name == "rm_test")
+        .unwrap()
+        .id
+        .clone();
 
     let err = app
         .attach(&agent_id, 5, 0, false, false, None)
@@ -302,7 +334,7 @@ async fn sandbox_provider_tracing_contains_metadata() {
         ("AGENTD_SANDBOX_TRACE_DIFF", "false".to_string()),
     ]);
 
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     app.spawn("trace_test", "sandbox", "echo test", 5, 0, None)
         .await

@@ -51,7 +51,7 @@ Serializable execution plan consumed by `run-plan`.
 Fields:
 - `Plan.name`
 - ordered `steps[]`
-- `PlanStep`: `id`, `name`, `prompt`, optional `provider`
+- `PlanStep`: `id`, `name`, `prompt`, optional `provider`, optional `runtime`
 - optional policy fields: `timeout_secs`, `retries`
 - optional dependency metadata: `depends_on`
 

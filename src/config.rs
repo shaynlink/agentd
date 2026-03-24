@@ -271,7 +271,8 @@ impl AppConfig {
                 .unwrap_or_default()
         };
 
-        let allowed_read_paths = if let Ok(raw) = env::var("AGENTD_SANDBOX_ALLOWED_READ_PATHS_JSON") {
+        let allowed_read_paths = if let Ok(raw) = env::var("AGENTD_SANDBOX_ALLOWED_READ_PATHS_JSON")
+        {
             serde_json::from_str::<Vec<String>>(&raw)
                 .context("AGENTD_SANDBOX_ALLOWED_READ_PATHS_JSON must be a JSON string array")?
         } else {
@@ -280,7 +281,9 @@ impl AppConfig {
                 .unwrap_or_default()
         };
 
-        let allowed_write_paths = if let Ok(raw) = env::var("AGENTD_SANDBOX_ALLOWED_WRITE_PATHS_JSON") {
+        let allowed_write_paths = if let Ok(raw) =
+            env::var("AGENTD_SANDBOX_ALLOWED_WRITE_PATHS_JSON")
+        {
             serde_json::from_str::<Vec<String>>(&raw)
                 .context("AGENTD_SANDBOX_ALLOWED_WRITE_PATHS_JSON must be a JSON string array")?
         } else {

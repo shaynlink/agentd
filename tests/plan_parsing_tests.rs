@@ -2,10 +2,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use agentd::adapters::store::sqlite::SqliteStore;
-use agentd::app::App;
+use agentd::app::{App, OutputMode, OutputOptions};
 use agentd::domain::agent::AgentState;
 use agentd::ports::store::StateStore;
 use uuid::Uuid;
+
+fn test_output_options() -> OutputOptions {
+    OutputOptions {
+        mode: OutputMode::Text,
+        quiet: true,
+    }
+}
 
 fn temp_db_path() -> String {
     let mut path = PathBuf::from(std::env::temp_dir());
@@ -26,7 +33,7 @@ fn write_plan_file(path: &Path, content: &str) {
 #[tokio::test]
 async fn run_plan_parses_yaml_plan_file() {
     let db_path = temp_db_path();
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     let plan_path = temp_plan_path("yaml");
     write_plan_file(
@@ -65,7 +72,7 @@ steps:
 #[tokio::test]
 async fn run_plan_parses_json_plan_file() {
     let db_path = temp_db_path();
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     let plan_path = temp_plan_path("json");
     write_plan_file(

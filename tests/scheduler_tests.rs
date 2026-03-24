@@ -1,11 +1,18 @@
 use std::path::PathBuf;
 
 use agentd::adapters::store::sqlite::SqliteStore;
-use agentd::app::App;
+use agentd::app::{App, OutputMode, OutputOptions};
 use agentd::domain::schedule::ScheduleState;
 use agentd::ports::store::StateStore;
 use chrono::{Duration, Utc};
 use uuid::Uuid;
+
+fn test_output_options() -> OutputOptions {
+    OutputOptions {
+        mode: OutputMode::Text,
+        quiet: true,
+    }
+}
 
 fn temp_db_path() -> String {
     let mut path = PathBuf::from(std::env::temp_dir());
@@ -16,7 +23,7 @@ fn temp_db_path() -> String {
 #[tokio::test]
 async fn dispatch_due_run_at_schedule_executes_once() {
     let db_path = temp_db_path();
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     let run_at = Utc::now() - Duration::seconds(2);
     app.schedule_run_at("once", "mock", "do work", run_at, 10, 0, None)
@@ -35,7 +42,7 @@ async fn dispatch_due_run_at_schedule_executes_once() {
 #[tokio::test]
 async fn dispatch_due_cron_schedule_replans_next_run() {
     let db_path = temp_db_path();
-    let app = App::new(db_path.clone()).expect("create app");
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
 
     app.schedule_cron(
         "hourly",
@@ -43,7 +50,9 @@ async fn dispatch_due_cron_schedule_replans_next_run() {
         "do recurring work",
         "0 0 * * * * *",
         10,
-        0,        None,    )
+        0,
+        None,
+    )
     .expect("create cron schedule");
 
     let store = SqliteStore::new(db_path.clone());
