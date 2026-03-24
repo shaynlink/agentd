@@ -1,7 +1,9 @@
 pub mod process;
+pub mod policy;
 pub mod provider;
 pub mod resource;
 pub mod runtime;
 pub mod securable;
 pub mod store;
 pub mod versioning;
+pub mod workspace_guard;
