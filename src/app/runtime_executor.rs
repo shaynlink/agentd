@@ -4,13 +4,15 @@ use std::{fs, io::Write};
 
 use anyhow::{Result, bail};
 use chrono::Utc;
-use rusqlite::{Connection, params};
 use serde_json::json;
 
+use crate::adapters::store::sqlite::SqliteStore;
 use crate::domain::capability::Capability;
 use crate::domain::process_handle::ProcessExecutionResult;
+use crate::domain::runtime_audit::{RuntimeArtifactInsert, RuntimeEventInsert, RuntimeSessionRecord};
 use crate::ports::policy::{PolicyPort, RuntimeAction};
 use crate::ports::runtime::RuntimePort;
+use crate::ports::store::StateStore;
 use crate::ports::workspace_guard::WorkspaceGuardPort;
 
 pub struct RuntimeExecutor {
@@ -60,35 +62,45 @@ impl RuntimeExecutor {
         Ok(())
     }
 
+    fn ensure_runtime_session(
+        &self,
+        store: &SqliteStore,
+        session_id: &str,
+        cwd: &str,
+    ) -> Result<bool> {
+        if store.get_runtime_session(session_id)?.is_some() {
+            return Ok(false);
+        }
+
+        let session = RuntimeSessionRecord {
+            session_id: session_id.to_string(),
+            mode: "sandbox".to_string(),
+            workspace_dir: cwd.to_string(),
+            repo_root: None,
+            base_commit: None,
+            branch_name: None,
+            permissions_profile: "sandbox".to_string(),
+            env_profile: "default".to_string(),
+            log_path: self
+                .event_log_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            created_at: Utc::now(),
+            closed_at: None,
+        };
+
+        store.create_runtime_session(&session)?;
+        Ok(true)
+    }
+
     fn append_runtime_event_sqlite(&self, event: &serde_json::Value) -> Result<()> {
         let Some(path) = self.event_db_path.as_ref() else {
             return Ok(());
         };
 
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let conn = Connection::open(path)?;
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS runtime_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts TEXT NOT NULL,
-                session_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                command TEXT,
-                cwd TEXT,
-                exit_code INTEGER,
-                payload TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_runtime_events_session_id
-                ON runtime_events(session_id, id DESC);
-            CREATE INDEX IF NOT EXISTS idx_runtime_events_ts
-                ON runtime_events(ts);
-            "#,
-        )?;
+        let store = SqliteStore::new(path.to_string_lossy().to_string());
+        store.init()?;
 
         let ts = event
             .get("ts")
@@ -116,11 +128,37 @@ impl RuntimeExecutor {
         let exit_code = event.get("exit_code").and_then(|v| v.as_i64());
         let payload = event.to_string();
 
-        conn.execute(
-            "INSERT INTO runtime_events (ts, session_id, event_type, command, cwd, exit_code, payload)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![ts, session_id, event_type, command, cwd, exit_code, payload],
+        let parsed_ts = chrono::DateTime::parse_from_rfc3339(&ts)
+            .map(|v| v.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+
+        let created = self.ensure_runtime_session(
+            &store,
+            &session_id,
+            cwd.as_deref().unwrap_or_default(),
         )?;
+
+        if created
+            && let Some(log_path) = self.event_log_path.as_ref()
+        {
+            store.append_runtime_artifact(&RuntimeArtifactInsert {
+                ts: Utc::now(),
+                session_id: session_id.clone(),
+                artifact_type: "runtime_event_log".to_string(),
+                path: log_path.display().to_string(),
+                metadata: Some("{\"format\":\"jsonl\"}".to_string()),
+            })?;
+        }
+
+        store.append_runtime_event(&RuntimeEventInsert {
+            ts: parsed_ts,
+            session_id,
+            event_type,
+            command,
+            cwd,
+            exit_code,
+            payload,
+        })?;
 
         Ok(())
     }

@@ -1,6 +1,10 @@
 use anyhow::Result;
 
 use crate::domain::agent::{AgentLog, AgentRecord, AgentState};
+use crate::domain::runtime_audit::{
+    RuntimeArtifactInsert, RuntimeArtifactRecord, RuntimeEventInsert, RuntimeEventRecord,
+    RuntimeSessionRecord,
+};
 use crate::domain::schedule::{ScheduleRecord, ScheduleRun, ScheduleState};
 
 pub trait StateStore {
@@ -29,4 +33,17 @@ pub trait StateStore {
         error: Option<&str>,
     ) -> Result<()>;
     fn get_schedule_runs(&self, schedule_id: &str, limit: usize) -> Result<Vec<ScheduleRun>>;
+
+    fn create_runtime_session(&self, session: &RuntimeSessionRecord) -> Result<()>;
+    fn close_runtime_session(&self, session_id: &str) -> Result<()>;
+    fn get_runtime_session(&self, session_id: &str) -> Result<Option<RuntimeSessionRecord>>;
+    fn append_runtime_event(&self, event: &RuntimeEventInsert) -> Result<()>;
+    fn list_runtime_events(&self, session_id: &str, limit: usize)
+        -> Result<Vec<RuntimeEventRecord>>;
+    fn append_runtime_artifact(&self, artifact: &RuntimeArtifactInsert) -> Result<()>;
+    fn list_runtime_artifacts(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<RuntimeArtifactRecord>>;
 }

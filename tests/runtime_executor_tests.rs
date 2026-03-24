@@ -113,6 +113,8 @@ async fn runtime_executor_writes_sqlite_events() {
     let workspace = std::env::current_dir().expect("get current dir");
     let mut db_path = std::env::temp_dir();
     db_path.push(format!("agentd-runtime-events-{}.db", Uuid::new_v4()));
+    let mut jsonl_path = std::env::temp_dir();
+    jsonl_path.push(format!("agentd-runtime-events-{}.jsonl", Uuid::new_v4()));
 
     let policy = Box::new(LocalPolicyEngine::new("full-trusted"));
     let guard = Box::new(
@@ -121,7 +123,9 @@ async fn runtime_executor_writes_sqlite_events() {
     );
     let runtime = runtimes::build_runtime("builtin").expect("build runtime");
 
-    let executor = RuntimeExecutor::new(policy, guard, runtime).with_event_db_path(db_path.clone());
+    let executor = RuntimeExecutor::new(policy, guard, runtime)
+        .with_event_log_path(jsonl_path)
+        .with_event_db_path(db_path.clone());
     executor
         .execute_command("sess_exec_db", "echo", &["sqlite-event".to_string()], 5, &workspace)
         .await
@@ -137,4 +141,22 @@ async fn runtime_executor_writes_sqlite_events() {
         .expect("count runtime events");
 
     assert_eq!(count, 1, "expected one executed event in sqlite");
+
+    let session_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM runtime_sessions WHERE session_id = ?1",
+            ["sess_exec_db"],
+            |row| row.get(0),
+        )
+        .expect("count runtime sessions");
+    assert_eq!(session_count, 1, "expected one runtime session row");
+
+    let artifact_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM runtime_artifacts WHERE session_id = ?1",
+            ["sess_exec_db"],
+            |row| row.get(0),
+        )
+        .expect("count runtime artifacts");
+    assert_eq!(artifact_count, 1, "expected one runtime artifact row");
 }

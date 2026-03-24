@@ -5,6 +5,7 @@ pub mod plan;
 pub mod process_handle;
 pub mod resource_limit;
 pub mod runtime_session;
+pub mod runtime_audit;
 pub mod capability;
 pub mod runtime_config;
 pub mod schedule;

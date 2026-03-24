@@ -5,6 +5,10 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::domain::agent::{AgentLog, AgentRecord, AgentState};
+use crate::domain::runtime_audit::{
+    RuntimeArtifactInsert, RuntimeArtifactRecord, RuntimeEventInsert, RuntimeEventRecord,
+    RuntimeSessionRecord,
+};
 use crate::domain::schedule::{ScheduleRecord, ScheduleRun, ScheduleState};
 use crate::ports::store::StateStore;
 
@@ -96,6 +100,55 @@ impl StateStore for SqliteStore {
 
             CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule_id
                 ON schedule_runs(schedule_id, id DESC);
+
+            CREATE TABLE IF NOT EXISTS runtime_sessions (
+                session_id TEXT PRIMARY KEY,
+                mode TEXT NOT NULL,
+                workspace_dir TEXT NOT NULL,
+                repo_root TEXT,
+                base_commit TEXT,
+                branch_name TEXT,
+                permissions_profile TEXT NOT NULL,
+                env_profile TEXT NOT NULL,
+                log_path TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                closed_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_runtime_sessions_created_at
+                ON runtime_sessions(created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS runtime_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                command TEXT,
+                cwd TEXT,
+                exit_code INTEGER,
+                payload TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES runtime_sessions(session_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_runtime_events_session_id
+                ON runtime_events(session_id, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_runtime_events_ts
+                ON runtime_events(ts);
+
+            CREATE TABLE IF NOT EXISTS runtime_artifacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                path TEXT NOT NULL,
+                metadata TEXT,
+                FOREIGN KEY(session_id) REFERENCES runtime_sessions(session_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_runtime_artifacts_session_id
+                ON runtime_artifacts(session_id, id DESC);
+            CREATE INDEX IF NOT EXISTS idx_runtime_artifacts_ts
+                ON runtime_artifacts(ts);
             "#,
         )
         .context("failed to initialize sqlite schema")?;
@@ -449,6 +502,174 @@ impl StateStore for SqliteStore {
                 finished_at: finished_at.as_deref().and_then(|ts| parse_ts(ts).ok()),
                 status: row.get(5)?,
                 error: row.get(6)?,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    fn create_runtime_session(&self, session: &RuntimeSessionRecord) -> Result<()> {
+        let conn = self.open()?;
+        conn.execute(
+            "INSERT INTO runtime_sessions
+             (session_id, mode, workspace_dir, repo_root, base_commit, branch_name, permissions_profile, env_profile, log_path, created_at, closed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                session.session_id,
+                session.mode,
+                session.workspace_dir,
+                session.repo_root,
+                session.base_commit,
+                session.branch_name,
+                session.permissions_profile,
+                session.env_profile,
+                session.log_path,
+                session.created_at.to_rfc3339(),
+                session.closed_at.map(|v| v.to_rfc3339()),
+            ],
+        )
+        .context("failed to create runtime session")?;
+        Ok(())
+    }
+
+    fn close_runtime_session(&self, session_id: &str) -> Result<()> {
+        let conn = self.open()?;
+        conn.execute(
+            "UPDATE runtime_sessions SET closed_at = ?1 WHERE session_id = ?2",
+            params![Utc::now().to_rfc3339(), session_id],
+        )
+        .with_context(|| format!("failed to close runtime session: {session_id}"))?;
+        Ok(())
+    }
+
+    fn get_runtime_session(&self, session_id: &str) -> Result<Option<RuntimeSessionRecord>> {
+        let conn = self.open()?;
+        let mut stmt = conn.prepare(
+            "SELECT session_id, mode, workspace_dir, repo_root, base_commit, branch_name, permissions_profile, env_profile, log_path, created_at, closed_at
+             FROM runtime_sessions
+             WHERE session_id = ?1",
+        )?;
+
+        let mut rows = stmt.query(params![session_id])?;
+        if let Some(row) = rows.next()? {
+            let created_at: String = row.get(9)?;
+            let closed_at: Option<String> = row.get(10)?;
+            return Ok(Some(RuntimeSessionRecord {
+                session_id: row.get(0)?,
+                mode: row.get(1)?,
+                workspace_dir: row.get(2)?,
+                repo_root: row.get(3)?,
+                base_commit: row.get(4)?,
+                branch_name: row.get(5)?,
+                permissions_profile: row.get(6)?,
+                env_profile: row.get(7)?,
+                log_path: row.get(8)?,
+                created_at: parse_ts(&created_at).unwrap_or_else(|_| Utc::now()),
+                closed_at: closed_at.as_deref().and_then(|v| parse_ts(v).ok()),
+            }));
+        }
+
+        Ok(None)
+    }
+
+    fn append_runtime_event(&self, event: &RuntimeEventInsert) -> Result<()> {
+        let conn = self.open()?;
+        conn.execute(
+            "INSERT INTO runtime_events (ts, session_id, event_type, command, cwd, exit_code, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                event.ts.to_rfc3339(),
+                event.session_id,
+                event.event_type,
+                event.command,
+                event.cwd,
+                event.exit_code,
+                event.payload,
+            ],
+        )
+        .context("failed to append runtime event")?;
+        Ok(())
+    }
+
+    fn list_runtime_events(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<RuntimeEventRecord>> {
+        let conn = self.open()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, session_id, event_type, command, cwd, exit_code, payload
+             FROM runtime_events
+             WHERE session_id = ?1
+             ORDER BY id DESC
+             LIMIT ?2",
+        )?;
+
+        let rows = stmt.query_map(params![session_id, limit as i64], |row| {
+            let ts: String = row.get(1)?;
+            Ok(RuntimeEventRecord {
+                id: row.get(0)?,
+                ts: parse_ts(&ts).unwrap_or_else(|_| Utc::now()),
+                session_id: row.get(2)?,
+                event_type: row.get(3)?,
+                command: row.get(4)?,
+                cwd: row.get(5)?,
+                exit_code: row.get(6)?,
+                payload: row.get(7)?,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    fn append_runtime_artifact(&self, artifact: &RuntimeArtifactInsert) -> Result<()> {
+        let conn = self.open()?;
+        conn.execute(
+            "INSERT INTO runtime_artifacts (ts, session_id, artifact_type, path, metadata)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                artifact.ts.to_rfc3339(),
+                artifact.session_id,
+                artifact.artifact_type,
+                artifact.path,
+                artifact.metadata,
+            ],
+        )
+        .context("failed to append runtime artifact")?;
+        Ok(())
+    }
+
+    fn list_runtime_artifacts(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> Result<Vec<RuntimeArtifactRecord>> {
+        let conn = self.open()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, ts, session_id, artifact_type, path, metadata
+             FROM runtime_artifacts
+             WHERE session_id = ?1
+             ORDER BY id DESC
+             LIMIT ?2",
+        )?;
+
+        let rows = stmt.query_map(params![session_id, limit as i64], |row| {
+            let ts: String = row.get(1)?;
+            Ok(RuntimeArtifactRecord {
+                id: row.get(0)?,
+                ts: parse_ts(&ts).unwrap_or_else(|_| Utc::now()),
+                session_id: row.get(2)?,
+                artifact_type: row.get(3)?,
+                path: row.get(4)?,
+                metadata: row.get(5)?,
             })
         })?;
 
