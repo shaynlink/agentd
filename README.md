@@ -36,7 +36,7 @@ Core capabilities:
 | Provider `mock` | Implemented |
 | Provider `cli` | Implemented for agent execution and plan generation |
 | Provider `http` | Implemented for agent execution (`run_agent`) |
-| Provider `vibe` | Alias to `cli` provider |
+| Provider `vibe` | Implemented as a dedicated CLI profile for Mistral Vibe |
 | Persistence | SQLite (`./.agentd/state.db` by default) |
 
 ## Prerequisites
@@ -87,6 +87,18 @@ prompt_mode = "stdin"
 prompt_flag = "--prompt"
 runtime_dir = "./.agentd/runtime"
 
+[providers.vibe]
+command = "vibe"
+args = ["run"]
+prompt_mode = "arg"
+prompt_flag = "--prompt"
+runtime_dir = "./.agentd/runtime"
+plan_command = "vibe"
+plan_args = ["plan", "generate"]
+plan_goal_mode = "arg"
+plan_goal_flag = "--goal"
+plan_output_format = "yaml"
+
 [providers.http]
 endpoint = "http://localhost:8080/run-agent"
 auth_mode = "none"
@@ -134,6 +146,38 @@ Notes:
 - restart recovery is automatic at startup: stale `running` agents are moved back to `pending`.
 - duplicate concurrent executions of the same agent are prevented by an execution lock.
 
+### Output Modes (Shell-Friendly)
+
+Global options available on all commands:
+
+- `--output text|json|jsonl|tsv` (default: `text`)
+- `--quiet` to suppress successful output
+
+Recommended usage in scripts:
+
+```bash
+cargo run -- --output json spawn --name "job" --provider mock --prompt "hello"
+```
+
+```bash
+cargo run -- --output jsonl list --state pending --provider sandbox
+```
+
+TSV mode is ideal for combining with Unix tools like `cut` and `awk`:
+
+```bash
+# Get all agent IDs from TSV output
+cargo run -- --output tsv list | cut -f1
+
+# Filter agents by provider and copy specific columns
+cargo run -- --output tsv list --provider sandbox | awk -F'\t' '{print $1, $2, $4}'
+```
+
+Additional options for broader use-cases:
+
+- `list --state <state> --provider <provider> --limit <n> --ids-only --sort-by <created_at|state|provider>`
+- `logs --id <agent_id> --limit <n> --level <info|warn|error> --contains <text>`
+
 ### CLI Provider Configuration
 
 The `cli` provider reads environment variables:
@@ -176,6 +220,30 @@ AGENTD_CLI_PLAN_GOAL_MODE=arg \
 AGENTD_CLI_PLAN_GOAL_FLAG=--goal \
 AGENTD_CLI_PLAN_OUTPUT_FORMAT=yaml \
 cargo run -- plan-generate --provider vibe --goal "Préparer un rapport" --output ./plan.yaml
+```
+
+### Vibe Provider Configuration
+
+The `vibe` provider reads environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AGENTD_VIBE_COMMAND` | `vibe` | Executable used to run Vibe CLI |
+| `AGENTD_VIBE_ARGS_JSON` | `["run"]` | JSON array of CLI arguments used for `attach` |
+| `AGENTD_VIBE_PROMPT_MODE` | `arg` | Prompt transport mode: `stdin` or `arg` |
+| `AGENTD_VIBE_PROMPT_FLAG` | `--prompt` | Flag name used when mode is `arg` |
+| `AGENTD_VIBE_RUNTIME_DIR` | `./.agentd/runtime` | PID file directory used for cancellation |
+| `AGENTD_VIBE_PLAN_COMMAND` | value of `AGENTD_VIBE_COMMAND` | Executable used for `plan-generate` |
+| `AGENTD_VIBE_PLAN_ARGS_JSON` | `["plan","generate"]` | JSON array of args used for `plan-generate` |
+| `AGENTD_VIBE_PLAN_GOAL_MODE` | `arg` | Goal transport mode for `plan-generate`: `stdin` or `arg` |
+| `AGENTD_VIBE_PLAN_GOAL_FLAG` | `--goal` | Flag name used when `AGENTD_VIBE_PLAN_GOAL_MODE=arg` |
+| `AGENTD_VIBE_PLAN_OUTPUT_FORMAT` | `yaml` | Output format returned by planner CLI: `yaml` or `json` |
+
+Example:
+
+```bash
+cargo run -- plan-generate --provider vibe --goal "Préparer un rapport" --output ./plan.yaml
+cargo run -- spawn --name "mistral-task" --provider vibe --prompt "Résume ce code"
 ```
 
 ### HTTP Provider Configuration

@@ -76,7 +76,7 @@ async fn attach_retries_and_fails_on_provider_error() {
     let db_path = temp_db_path();
     let app = App::new(db_path.clone()).expect("create app");
 
-    app.spawn("failing", "cli", "ignored", 2, 2)
+    app.spawn("failing", "cli", "ignored", 2, 2, None)
         .await
         .expect("spawn failing cli agent");
 
@@ -86,7 +86,7 @@ async fn attach_retries_and_fails_on_provider_error() {
     let agent_id = agents[0].id.clone();
 
     let err = app
-        .attach(&agent_id, 2, 2, false, false)
+        .attach(&agent_id, 2, 2, false, false, None)
         .await
         .expect_err("attach should fail after retries");
     assert!(
@@ -137,7 +137,7 @@ async fn attach_retries_and_times_out() {
     let db_path = temp_db_path();
     let app = App::new(db_path.clone()).expect("create app");
 
-    app.spawn("timeout", "cli", "ignored", 1, 1)
+    app.spawn("timeout", "cli", "ignored", 1, 1, None)
         .await
         .expect("spawn timeout cli agent");
 
@@ -147,7 +147,7 @@ async fn attach_retries_and_times_out() {
     let agent_id = agents[0].id.clone();
 
     let err = app
-        .attach(&agent_id, 1, 1, false, false)
+        .attach(&agent_id, 1, 1, false, false, None)
         .await
         .expect_err("attach should time out after retries");
     assert!(

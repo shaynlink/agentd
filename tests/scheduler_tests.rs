@@ -19,7 +19,7 @@ async fn dispatch_due_run_at_schedule_executes_once() {
     let app = App::new(db_path.clone()).expect("create app");
 
     let run_at = Utc::now() - Duration::seconds(2);
-    app.schedule_run_at("once", "mock", "do work", run_at, 10, 0)
+    app.schedule_run_at("once", "mock", "do work", run_at, 10, 0, None)
         .expect("create run-at schedule");
 
     app.dispatch_due_schedules(50)
@@ -43,8 +43,7 @@ async fn dispatch_due_cron_schedule_replans_next_run() {
         "do recurring work",
         "0 0 * * * * *",
         10,
-        0,
-    )
+        0,        None,    )
     .expect("create cron schedule");
 
     let store = SqliteStore::new(db_path.clone());

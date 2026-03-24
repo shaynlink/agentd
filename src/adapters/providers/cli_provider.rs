@@ -13,11 +13,27 @@ use crate::config::AppConfig;
 use crate::domain::plan::Plan;
 use crate::ports::provider::{Provider, ProviderRunRequest, ProviderRunResult};
 
-pub struct CliProvider;
+#[derive(Debug, Clone, Copy)]
+enum CliProviderProfile {
+    Cli,
+    Vibe,
+}
+
+pub struct CliProvider {
+    profile: CliProviderProfile,
+}
 
 impl CliProvider {
     pub fn new() -> Self {
-        Self
+        Self {
+            profile: CliProviderProfile::Cli,
+        }
+    }
+
+    pub fn new_vibe() -> Self {
+        Self {
+            profile: CliProviderProfile::Vibe,
+        }
     }
 }
 
@@ -72,9 +88,12 @@ struct CliProviderConfig {
 }
 
 impl CliProviderConfig {
-    fn load() -> Result<Self> {
+    fn load(profile: CliProviderProfile) -> Result<Self> {
         let cfg = AppConfig::load()?;
-        let cli_cfg = cfg.cli;
+        let cli_cfg = match profile {
+            CliProviderProfile::Cli => cfg.cli,
+            CliProviderProfile::Vibe => cfg.vibe,
+        };
 
         Ok(Self {
             command: cli_cfg.command,
@@ -225,11 +244,14 @@ where
 #[async_trait]
 impl Provider for CliProvider {
     fn name(&self) -> &'static str {
-        "cli"
+        match self.profile {
+            CliProviderProfile::Cli => "cli",
+            CliProviderProfile::Vibe => "vibe",
+        }
     }
 
     async fn generate_plan(&self, goal: &str) -> Result<Plan> {
-        let cfg = CliProviderConfig::load()?;
+        let cfg = CliProviderConfig::load(self.profile)?;
         let raw = run_cli_capture_output(
             &cfg.plan_command,
             &cfg.plan_args,
@@ -251,7 +273,7 @@ impl Provider for CliProvider {
     }
 
     async fn run_agent(&self, request: ProviderRunRequest) -> Result<ProviderRunResult> {
-        let cfg = CliProviderConfig::load()?;
+        let cfg = CliProviderConfig::load(self.profile)?;
 
         let mut command = Command::new(&cfg.command);
         command.args(&cfg.args);
@@ -401,7 +423,7 @@ impl Provider for CliProvider {
     }
 
     async fn cancel(&self, agent_id: &str) -> Result<()> {
-        let cfg = CliProviderConfig::load()?;
+        let cfg = CliProviderConfig::load(self.profile)?;
         let pid_path = cfg.pid_path(agent_id);
         if !pid_path.exists() {
             return Ok(());
