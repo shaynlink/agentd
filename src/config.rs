@@ -39,6 +39,7 @@ pub struct HttpProviderConfig {
 #[derive(Debug, Clone)]
 pub struct SandboxProviderConfig {
     pub runtime: String,
+    pub role: String,
     pub workdir: PathBuf,
     pub allowed_commands: Vec<String>,
     pub allowed_read_paths: Vec<String>,
@@ -88,6 +89,7 @@ struct FileHttpProviderConfig {
 #[derive(Debug, Deserialize, Default)]
 struct FileSandboxProviderConfig {
     runtime: Option<String>,
+    role: Option<String>,
     workdir: Option<PathBuf>,
     allowed_commands: Option<Vec<String>>,
     allowed_read_paths: Option<Vec<String>>,
@@ -256,6 +258,11 @@ impl AppConfig {
             .or_else(|| file_sandbox.and_then(|s| s.runtime.clone()))
             .unwrap_or_else(|| "process".to_string());
 
+        let role = env::var("AGENTD_SANDBOX_ROLE")
+            .ok()
+            .or_else(|| file_sandbox.and_then(|s| s.role.clone()))
+            .unwrap_or_else(|| "operator".to_string());
+
         let workdir = env::var("AGENTD_SANDBOX_WORKDIR")
             .ok()
             .map(PathBuf::from)
@@ -344,6 +351,7 @@ impl AppConfig {
             },
             sandbox: SandboxProviderConfig {
                 runtime,
+                role,
                 workdir,
                 allowed_commands,
                 allowed_read_paths,

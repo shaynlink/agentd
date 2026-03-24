@@ -1,4 +1,6 @@
 pub mod agent;
+pub mod audit_log;
+pub mod permission;
 pub mod plan;
 pub mod process_handle;
 pub mod resource_limit;

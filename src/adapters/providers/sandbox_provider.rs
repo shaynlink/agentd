@@ -11,6 +11,8 @@ use serde_json::json;
 use tokio::process::Command;
 
 use crate::adapters::runtimes;
+use crate::domain::audit_log::{CommandAuditEntry, output_preview};
+use crate::domain::permission::{PermissionSet, RuntimeRole};
 use crate::domain::plan::Plan;
 use crate::domain::runtime_config::RuntimeConfig;
 use crate::ports::provider::{Provider, ProviderRunRequest, ProviderRunResult};
@@ -264,12 +266,25 @@ impl Provider for SandboxProvider {
     async fn run_agent(&self, request: ProviderRunRequest) -> Result<ProviderRunResult> {
         let cfg = crate::config::AppConfig::load()?;
         let sandbox_cfg = &cfg.sandbox;
+        let permissions = PermissionSet {
+            role: RuntimeRole::from_value(&sandbox_cfg.role),
+            allowed_commands: sandbox_cfg.allowed_commands.clone(),
+            allowed_read_paths: sandbox_cfg.allowed_read_paths.clone(),
+            allowed_write_paths: sandbox_cfg.allowed_write_paths.clone(),
+        };
 
         // Trim whitespace from prompt for validation
         let prompt_trimmed = request.prompt.trim();
 
+        if !permissions.can_execute_any_command() {
+            bail!(
+                "command execution denied for role '{}'",
+                permissions.role.as_str()
+            );
+        }
+
         // Validate command against ACL
-        if !sandbox_cfg.allowed_commands.is_empty() {
+        if !permissions.bypass_acl() && !sandbox_cfg.allowed_commands.is_empty() {
             let cmd_parts: Vec<&str> = prompt_trimmed.split_whitespace().collect();
             if !cmd_parts.is_empty() {
                 let main_cmd = cmd_parts[0];
@@ -357,12 +372,25 @@ impl Provider for SandboxProvider {
 
         // Compose tracing data
         let tracing = if sandbox_cfg.trace_commands || sandbox_cfg.trace_diff {
+            let audit = CommandAuditEntry {
+                ts: Utc::now(),
+                agent_id: request.agent_id.clone(),
+                role: permissions.role.as_str().to_string(),
+                runtime: resolved_runtime.runtime.clone(),
+                command_input: prompt_trimmed.to_string(),
+                command_output_preview: output_preview(&output, 300),
+                allowed: true,
+                exit_code: Some(exit_code),
+            };
+
             json!({
                 "timestamp": Utc::now().to_rfc3339(),
                 "agent_id": request.agent_id,
                 "command": prompt_trimmed,
                 "exit_code": exit_code,
                 "runtime": resolved_runtime.runtime,
+                "role": permissions.role.as_str(),
+                "audit": audit,
                 "workdir": agent_workdir.display().to_string(),
                 "diff": if sandbox_cfg.trace_diff { diff } else { json!(null) },
             })

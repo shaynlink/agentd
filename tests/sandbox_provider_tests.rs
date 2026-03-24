@@ -364,5 +364,46 @@ async fn sandbox_provider_tracing_contains_metadata() {
     assert!(msg.contains("command"), "missing command");
     assert!(msg.contains("exit_code"), "missing exit_code");
     assert!(msg.contains("runtime"), "missing runtime");
+    assert!(msg.contains("role"), "missing role");
+    assert!(msg.contains("command_input"), "missing audit command_input");
+    assert!(
+        msg.contains("command_output_preview"),
+        "missing audit command_output_preview"
+    );
     assert!(msg.contains("workdir"), "missing workdir");
+}
+
+#[tokio::test]
+async fn sandbox_provider_viewer_role_denies_execution() {
+    let sandbox_dir = temp_sandbox_dir();
+    let db_path = temp_db_path();
+
+    let _env = EnvGuard::set(&[
+        ("AGENTD_SANDBOX_RUNTIME", "process".to_string()),
+        ("AGENTD_SANDBOX_ROLE", "viewer".to_string()),
+        ("AGENTD_SANDBOX_WORKDIR", sandbox_dir.clone()),
+        ("AGENTD_SANDBOX_TRACE_COMMANDS", "true".to_string()),
+        ("AGENTD_SANDBOX_TRACE_DIFF", "false".to_string()),
+    ]);
+
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
+
+    app.spawn("viewer_denied", "sandbox", "echo blocked", 5, 0, None)
+        .await
+        .expect("spawn agent");
+
+    let store = SqliteStore::new(db_path);
+    let agents = store.list_agents().expect("list agents");
+    let agent_id = agents[0].id.clone();
+
+    let err = app
+        .attach(&agent_id, 5, 0, false, false, None)
+        .await
+        .expect_err("viewer role should not execute commands");
+
+    assert!(
+        err.to_string().contains("denied for role 'viewer'"),
+        "unexpected error: {}",
+        err
+    );
 }
