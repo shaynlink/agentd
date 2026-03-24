@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use agentd::adapters::security::local_securable::LocalSecurable;
 use agentd::config::SandboxProviderConfig;
 use agentd::ports::securable::{AuditEventFilters, SecurablePort};
+use rusqlite::params;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -165,5 +166,152 @@ async fn file_audit_filters_apply_for_json_lines() {
         filtered[0].contains("echo beta"),
         "expected matching file event payload: {}",
         filtered[0]
+    );
+}
+
+#[tokio::test]
+async fn sqlite_rbac_policies_persist_across_restarts() {
+    let audit_db_path = temp_path("audit-rbac-persist.db");
+    let mut config = test_sandbox_config("sqlite", audit_db_path.clone());
+    config.allowed_commands = vec!["echo".to_string()];
+
+    let securable = LocalSecurable::new(&config);
+
+    let echo_allowed = securable
+        .check_command_access("echo", "operator")
+        .await
+        .expect("check echo access");
+    let ls_allowed_before = securable
+        .check_command_access("ls", "operator")
+        .await
+        .expect("check ls access before persisted policy");
+
+    assert!(echo_allowed, "operator should initially allow echo");
+    assert!(
+        !ls_allowed_before,
+        "operator should initially deny ls based on seeded policies"
+    );
+
+    let conn = rusqlite::Connection::open(&audit_db_path).expect("open RBAC sqlite DB");
+    let operator_role_id: i64 = conn
+        .query_row(
+            "SELECT id FROM rbac_roles WHERE LOWER(name) = 'operator'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("operator role should exist");
+
+    conn.execute(
+        "INSERT OR IGNORE INTO rbac_policies (name, resource_type, action, resource_pattern, effect)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            "operator.command.execute.allow.ls",
+            "command",
+            "execute",
+            "ls",
+            "allow"
+        ],
+    )
+    .expect("insert persisted operator ls policy");
+
+    let ls_policy_id: i64 = conn
+        .query_row(
+            "SELECT id FROM rbac_policies WHERE name = ?1",
+            params!["operator.command.execute.allow.ls"],
+            |row| row.get(0),
+        )
+        .expect("fetch ls policy id");
+
+    conn.execute(
+        "INSERT OR IGNORE INTO rbac_role_policies (role_id, policy_id) VALUES (?1, ?2)",
+        params![operator_role_id, ls_policy_id],
+    )
+    .expect("attach ls policy to operator role");
+
+    let mut reloaded_config = test_sandbox_config("sqlite", audit_db_path.clone());
+    reloaded_config.allowed_commands = Vec::new();
+    let reloaded_securable = LocalSecurable::new(&reloaded_config);
+
+    let ls_allowed_after = reloaded_securable
+        .check_command_access("ls", "operator")
+        .await
+        .expect("check ls access after persisted policy");
+    assert!(
+        ls_allowed_after,
+        "persisted RBAC policy should survive LocalSecurable restart"
+    );
+}
+
+#[tokio::test]
+async fn sqlite_rbac_bindings_drive_role_resolution() {
+    let audit_db_path = temp_path("audit-rbac-bindings.db");
+    let config = test_sandbox_config("sqlite", audit_db_path.clone());
+    let securable = LocalSecurable::new(&config);
+
+    let denied_before = securable
+        .check_command_access("deploy-prod", "release-engineer")
+        .await
+        .expect("check deploy access before binding");
+    assert!(
+        !denied_before,
+        "subject without binding should be denied when no matching command policy exists"
+    );
+
+    let conn = rusqlite::Connection::open(&audit_db_path).expect("open RBAC sqlite DB");
+    conn.execute(
+        "INSERT OR IGNORE INTO rbac_roles (name, description, is_builtin) VALUES (?1, ?2, 0)",
+        params!["deployer", "Custom deployer role"],
+    )
+    .expect("insert deployer role");
+
+    let deployer_role_id: i64 = conn
+        .query_row(
+            "SELECT id FROM rbac_roles WHERE LOWER(name) = 'deployer'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("fetch deployer role id");
+
+    conn.execute(
+        "INSERT OR IGNORE INTO rbac_policies (name, resource_type, action, resource_pattern, effect)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            "deployer.command.execute.allow.deploy",
+            "command",
+            "execute",
+            "deploy*",
+            "allow"
+        ],
+    )
+    .expect("insert deploy policy");
+
+    let deploy_policy_id: i64 = conn
+        .query_row(
+            "SELECT id FROM rbac_policies WHERE name = ?1",
+            params!["deployer.command.execute.allow.deploy"],
+            |row| row.get(0),
+        )
+        .expect("fetch deploy policy id");
+
+    conn.execute(
+        "INSERT OR IGNORE INTO rbac_role_policies (role_id, policy_id) VALUES (?1, ?2)",
+        params![deployer_role_id, deploy_policy_id],
+    )
+    .expect("attach deploy policy to deployer role");
+
+    conn.execute(
+        "INSERT OR IGNORE INTO rbac_bindings (subject_type, subject, role_id) VALUES (?1, ?2, ?3)",
+        params!["runtime_role", "release-engineer", deployer_role_id],
+    )
+    .expect("bind runtime role to deployer role");
+
+    let reloaded = LocalSecurable::new(&config);
+    let allowed_after = reloaded
+        .check_command_access("deploy-prod", "release-engineer")
+        .await
+        .expect("check deploy access after binding");
+    assert!(
+        allowed_after,
+        "binding should resolve subject to role and allow deploy command"
     );
 }
