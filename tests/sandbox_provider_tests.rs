@@ -1,5 +1,4 @@
 use std::fs;
-use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
 use agentd::adapters::store::sqlite::SqliteStore;
@@ -19,19 +18,19 @@ fn test_output_options() -> OutputOptions {
 }
 
 fn temp_db_path() -> String {
-    let mut path = PathBuf::from(std::env::temp_dir());
+    let mut path = std::env::temp_dir();
     path.push(format!("agentd-sandbox-test-{}.db", Uuid::new_v4()));
     path.to_string_lossy().to_string()
 }
 
 fn temp_sandbox_dir() -> String {
-    let mut path = PathBuf::from(std::env::temp_dir());
+    let mut path = std::env::temp_dir();
     path.push(format!("agentd-sandbox-{}", Uuid::new_v4()));
     path.to_string_lossy().to_string()
 }
 
 fn temp_audit_path() -> String {
-    let mut path = PathBuf::from(std::env::temp_dir());
+    let mut path = std::env::temp_dir();
     path.push(format!("agentd-audit-{}.log", Uuid::new_v4()));
     path.to_string_lossy().to_string()
 }

@@ -32,6 +32,16 @@ pub struct OutputOptions {
     pub quiet: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AuditListFilters<'a> {
+    pub role: Option<&'a str>,
+    pub allowed: Option<bool>,
+    pub runtime: Option<&'a str>,
+    pub agent_id: Option<&'a str>,
+    pub since: Option<&'a str>,
+    pub until: Option<&'a str>,
+}
+
 pub struct App {
     store: SqliteStore,
     output: OutputOptions,
@@ -572,15 +582,34 @@ impl App {
         Ok(())
     }
 
-    pub async fn audit_list(
-        &self,
-        limit: usize,
-        role: Option<&str>,
-        allowed: Option<bool>,
-    ) -> Result<()> {
+    pub async fn audit_list(&self, limit: usize, filters: AuditListFilters<'_>) -> Result<()> {
         let cfg = crate::config::AppConfig::load()?;
         let securable = security::build_securable(&cfg.sandbox);
         let raw_events = securable.list_audit_events(limit).await?;
+
+        let since_dt = if let Some(s) = filters.since {
+            Some(
+                DateTime::parse_from_rfc3339(s)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .with_context(|| {
+                        format!("invalid --since timestamp (RFC3339 expected): {s}")
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        let until_dt = if let Some(s) = filters.until {
+            Some(
+                DateTime::parse_from_rfc3339(s)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .with_context(|| {
+                        format!("invalid --until timestamp (RFC3339 expected): {s}")
+                    })?,
+            )
+        } else {
+            None
+        };
 
         let mut events = Vec::new();
         for payload in raw_events {
@@ -589,7 +618,7 @@ impl App {
             }
         }
 
-        if let Some(role_filter) = role {
+        if let Some(role_filter) = filters.role {
             events.retain(|e| {
                 e.get("role")
                     .and_then(Value::as_str)
@@ -598,11 +627,49 @@ impl App {
             });
         }
 
-        if let Some(allowed_filter) = allowed {
+        if let Some(allowed_filter) = filters.allowed {
             events.retain(|e| {
                 e.get("allowed")
                     .and_then(Value::as_bool)
                     .map(|v| v == allowed_filter)
+                    .unwrap_or(false)
+            });
+        }
+
+        if let Some(runtime_filter) = filters.runtime {
+            events.retain(|e| {
+                e.get("runtime")
+                    .and_then(Value::as_str)
+                    .map(|r| r.eq_ignore_ascii_case(runtime_filter))
+                    .unwrap_or(false)
+            });
+        }
+
+        if let Some(agent_filter) = filters.agent_id {
+            events.retain(|e| {
+                e.get("agent_id")
+                    .and_then(Value::as_str)
+                    .map(|id| id == agent_filter)
+                    .unwrap_or(false)
+            });
+        }
+
+        if let Some(min_ts) = since_dt {
+            events.retain(|e| {
+                e.get("ts")
+                    .and_then(Value::as_str)
+                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                    .map(|dt| dt.with_timezone(&Utc) >= min_ts)
+                    .unwrap_or(false)
+            });
+        }
+
+        if let Some(max_ts) = until_dt {
+            events.retain(|e| {
+                e.get("ts")
+                    .and_then(Value::as_str)
+                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                    .map(|dt| dt.with_timezone(&Utc) <= max_ts)
                     .unwrap_or(false)
             });
         }

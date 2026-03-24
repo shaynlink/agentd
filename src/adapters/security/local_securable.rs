@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use rusqlite::params;
+use serde_json::Value;
 
 use crate::config::SandboxProviderConfig;
 use crate::domain::permission::RuntimeRole;
@@ -78,18 +79,107 @@ impl LocalSecurable {
             CREATE TABLE IF NOT EXISTS security_audit_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts TEXT NOT NULL,
-                payload TEXT NOT NULL
+                payload TEXT NOT NULL,
+                agent_id TEXT,
+                role TEXT,
+                runtime TEXT,
+                allowed INTEGER,
+                exit_code INTEGER
             );
 
             CREATE INDEX IF NOT EXISTS idx_security_audit_logs_ts
                 ON security_audit_logs(ts);
+            CREATE INDEX IF NOT EXISTS idx_security_audit_logs_agent_id
+                ON security_audit_logs(agent_id);
+            CREATE INDEX IF NOT EXISTS idx_security_audit_logs_role
+                ON security_audit_logs(role);
+            CREATE INDEX IF NOT EXISTS idx_security_audit_logs_runtime
+                ON security_audit_logs(runtime);
+            CREATE INDEX IF NOT EXISTS idx_security_audit_logs_allowed
+                ON security_audit_logs(allowed);
             "#,
         )
         .context("failed to initialize sqlite audit schema")?;
 
+        // Migration-safe upgrade for pre-existing DBs created before normalized columns.
+        let existing_cols = {
+            let mut stmt = conn
+                .prepare("PRAGMA table_info(security_audit_logs)")
+                .context("failed to inspect security_audit_logs schema")?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(1))
+                .context("failed to read security_audit_logs columns")?;
+            let mut cols = std::collections::HashSet::new();
+            for row in rows {
+                cols.insert(row?);
+            }
+            cols
+        };
+
+        for column_sql in [
+            (
+                "agent_id",
+                "ALTER TABLE security_audit_logs ADD COLUMN agent_id TEXT",
+            ),
+            (
+                "role",
+                "ALTER TABLE security_audit_logs ADD COLUMN role TEXT",
+            ),
+            (
+                "runtime",
+                "ALTER TABLE security_audit_logs ADD COLUMN runtime TEXT",
+            ),
+            (
+                "allowed",
+                "ALTER TABLE security_audit_logs ADD COLUMN allowed INTEGER",
+            ),
+            (
+                "exit_code",
+                "ALTER TABLE security_audit_logs ADD COLUMN exit_code INTEGER",
+            ),
+        ] {
+            if !existing_cols.contains(column_sql.0) {
+                conn.execute(column_sql.1, [])
+                    .with_context(|| format!("failed to migrate audit column: {}", column_sql.0))?;
+            }
+        }
+
+        let parsed = serde_json::from_str::<Value>(payload).ok();
+        let ts = parsed
+            .as_ref()
+            .and_then(|v| v.get("ts"))
+            .and_then(Value::as_str)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+        let agent_id = parsed
+            .as_ref()
+            .and_then(|v| v.get("agent_id"))
+            .and_then(Value::as_str)
+            .map(|s| s.to_string());
+        let role = parsed
+            .as_ref()
+            .and_then(|v| v.get("role"))
+            .and_then(Value::as_str)
+            .map(|s| s.to_string());
+        let runtime = parsed
+            .as_ref()
+            .and_then(|v| v.get("runtime"))
+            .and_then(Value::as_str)
+            .map(|s| s.to_string());
+        let allowed = parsed
+            .as_ref()
+            .and_then(|v| v.get("allowed"))
+            .and_then(Value::as_bool)
+            .map(|b| if b { 1_i64 } else { 0_i64 });
+        let exit_code = parsed
+            .as_ref()
+            .and_then(|v| v.get("exit_code"))
+            .and_then(Value::as_i64);
+
         conn.execute(
-            "INSERT INTO security_audit_logs (ts, payload) VALUES (?1, ?2)",
-            params![chrono::Utc::now().to_rfc3339(), payload],
+            "INSERT INTO security_audit_logs (ts, payload, agent_id, role, runtime, allowed, exit_code)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![ts, payload, agent_id, role, runtime, allowed, exit_code],
         )
         .context("failed to append sqlite audit log")?;
 
@@ -131,7 +221,7 @@ impl LocalSecurable {
         })?;
 
         let mut stmt = conn
-            .prepare("SELECT payload FROM security_audit_logs ORDER BY id DESC LIMIT ?1")
+            .prepare("SELECT payload FROM security_audit_logs ORDER BY ts DESC, id DESC LIMIT ?1")
             .context("failed to prepare audit list query")?;
 
         let rows = stmt

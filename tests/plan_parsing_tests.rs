@@ -15,13 +15,13 @@ fn test_output_options() -> OutputOptions {
 }
 
 fn temp_db_path() -> String {
-    let mut path = PathBuf::from(std::env::temp_dir());
+    let mut path = std::env::temp_dir();
     path.push(format!("agentd-test-{}.db", Uuid::new_v4()));
     path.to_string_lossy().to_string()
 }
 
 fn temp_plan_path(ext: &str) -> PathBuf {
-    let mut path = PathBuf::from(std::env::temp_dir());
+    let mut path = std::env::temp_dir();
     path.push(format!("agentd-plan-{}.{}", Uuid::new_v4(), ext));
     path
 }

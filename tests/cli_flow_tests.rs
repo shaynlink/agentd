@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::process::Command;
 
 use agentd::adapters::store::sqlite::SqliteStore;
@@ -6,7 +5,7 @@ use agentd::ports::store::StateStore;
 use uuid::Uuid;
 
 fn temp_db_path() -> String {
-    let mut path = PathBuf::from(std::env::temp_dir());
+    let mut path = std::env::temp_dir();
     path.push(format!("agentd-test-{}.db", Uuid::new_v4()));
     path.to_string_lossy().to_string()
 }

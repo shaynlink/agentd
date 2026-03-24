@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 
-use crate::app::{App, OutputMode, OutputOptions};
+use crate::app::{App, AuditListFilters, OutputMode, OutputOptions};
 use crate::config::AppConfig;
 
 #[derive(Debug, Parser)]
@@ -129,6 +129,14 @@ enum Commands {
         role: Option<String>,
         #[arg(long)]
         allowed: Option<bool>,
+        #[arg(long)]
+        runtime: Option<String>,
+        #[arg(long)]
+        agent_id: Option<String>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        until: Option<String>,
     },
     /// Create a one-shot schedule at an RFC3339 UTC datetime
     ScheduleRunAt {
@@ -275,7 +283,24 @@ pub async fn run() -> Result<()> {
             limit,
             role,
             allowed,
-        } => app.audit_list(limit, role.as_deref(), allowed).await,
+            runtime,
+            agent_id,
+            since,
+            until,
+        } => {
+            app.audit_list(
+                limit,
+                AuditListFilters {
+                    role: role.as_deref(),
+                    allowed,
+                    runtime: runtime.as_deref(),
+                    agent_id: agent_id.as_deref(),
+                    since: since.as_deref(),
+                    until: until.as_deref(),
+                },
+            )
+            .await
+        }
         Commands::ScheduleRunAt {
             name,
             prompt,

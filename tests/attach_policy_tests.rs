@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use agentd::adapters::store::sqlite::SqliteStore;
 use agentd::app::{App, OutputMode, OutputOptions};
@@ -18,23 +17,25 @@ fn test_output_options() -> OutputOptions {
 }
 
 fn temp_db_path() -> String {
-    let mut path = PathBuf::from(std::env::temp_dir());
+    let mut path = std::env::temp_dir();
     path.push(format!("agentd-test-{}.db", Uuid::new_v4()));
     path.to_string_lossy().to_string()
 }
 
 fn temp_runtime_dir() -> String {
-    let mut path = PathBuf::from(std::env::temp_dir());
+    let mut path = std::env::temp_dir();
     path.push(format!("agentd-runtime-{}", Uuid::new_v4()));
     path.to_string_lossy().to_string()
 }
 
 struct EnvGuard {
+    _guard: MutexGuard<'static, ()>,
     entries: Vec<(String, Option<String>)>,
 }
 
 impl EnvGuard {
     fn set(entries: &[(&str, String)]) -> Self {
+        let guard = ENV_LOCK.lock().expect("lock test env");
         let mut saved = Vec::with_capacity(entries.len());
         for (key, value) in entries {
             let key_string = (*key).to_string();
@@ -46,7 +47,10 @@ impl EnvGuard {
             saved.push((key_string, previous));
         }
 
-        Self { entries: saved }
+        Self {
+            _guard: guard,
+            entries: saved,
+        }
     }
 }
 
@@ -73,7 +77,6 @@ impl Drop for EnvGuard {
 
 #[tokio::test]
 async fn attach_retries_and_fails_on_provider_error() {
-    let _lock = ENV_LOCK.lock().expect("lock test env");
     let _env = EnvGuard::set(&[
         ("AGENTD_CLI_COMMAND", "/usr/bin/false".to_string()),
         ("AGENTD_CLI_ARGS_JSON", "[]".to_string()),
@@ -134,7 +137,6 @@ async fn attach_retries_and_fails_on_provider_error() {
 
 #[tokio::test]
 async fn attach_retries_and_times_out() {
-    let _lock = ENV_LOCK.lock().expect("lock test env");
     let _env = EnvGuard::set(&[
         ("AGENTD_CLI_COMMAND", "/bin/sh".to_string()),
         ("AGENTD_CLI_ARGS_JSON", "[\"-c\",\"sleep 2\"]".to_string()),

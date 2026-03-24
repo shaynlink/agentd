@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use agentd::adapters::providers::cli_provider::CliProvider;
 use agentd::ports::provider::{Provider, ProviderRunRequest};
@@ -8,17 +7,19 @@ use uuid::Uuid;
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn temp_runtime_dir() -> String {
-    let mut path = PathBuf::from(std::env::temp_dir());
+    let mut path = std::env::temp_dir();
     path.push(format!("agentd-runtime-{}", Uuid::new_v4()));
     path.to_string_lossy().to_string()
 }
 
 struct EnvGuard {
+    _guard: MutexGuard<'static, ()>,
     entries: Vec<(String, Option<String>)>,
 }
 
 impl EnvGuard {
     fn set(entries: &[(&str, String)]) -> Self {
+        let guard = ENV_LOCK.lock().expect("lock test env");
         let mut saved = Vec::with_capacity(entries.len());
         for (key, value) in entries {
             let key_string = (*key).to_string();
@@ -29,7 +30,10 @@ impl EnvGuard {
             }
             saved.push((key_string, previous));
         }
-        Self { entries: saved }
+        Self {
+            _guard: guard,
+            entries: saved,
+        }
     }
 }
 
@@ -55,7 +59,6 @@ impl Drop for EnvGuard {
 }
 
 async fn run_stream_case(json_lines: bool) -> String {
-    let _lock = ENV_LOCK.lock().expect("lock test env");
     let _env = EnvGuard::set(&[
         ("AGENTD_CLI_COMMAND", "/bin/sh".to_string()),
         (
@@ -80,7 +83,6 @@ async fn run_stream_case(json_lines: bool) -> String {
 }
 
 async fn generate_plan_case(plan_output_format: &str, goal: &str) -> String {
-    let _lock = ENV_LOCK.lock().expect("lock test env");
     let _env = EnvGuard::set(&[
         ("AGENTD_CLI_PLAN_COMMAND", "/bin/sh".to_string()),
         ("AGENTD_CLI_PLAN_ARGS_JSON", "[\"-c\",\"cat\"]".to_string()),
@@ -101,7 +103,6 @@ async fn generate_plan_case(plan_output_format: &str, goal: &str) -> String {
 }
 
 async fn run_vibe_case() -> String {
-    let _lock = ENV_LOCK.lock().expect("lock test env");
     let _env = EnvGuard::set(&[
         ("AGENTD_VIBE_COMMAND", "/bin/sh".to_string()),
         (
