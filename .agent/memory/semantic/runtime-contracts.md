@@ -4,6 +4,7 @@
 ## INDEX
 - [Runtime Ports](#runtime-ports) — runtime, process, resource contracts
 - [Builtin Runtime Adapter](#builtin-runtime-adapter) — execute/spawn/kill baseline
+- [Security Adapter](#security-adapter) — command/file checks and audit persistence
 - [Runtime Precedence](#runtime-precedence) — plan, CLI override, config
 - [Sandbox Integration](#sandbox-integration) — provider runtime resolution and tracing
 
@@ -37,6 +38,20 @@ Behavior:
 
 Current limitation:
 - CPU/RAM metrics are placeholder; wall-time is tracked
+
+</section>
+
+## <section id="security-adapter"> Security Adapter
+
+Files:
+- `src/ports/securable.rs`
+- `src/adapters/security/local_securable.rs`
+- `src/adapters/security/mod.rs`
+
+Behavior:
+- role-based command gating (`viewer` denied execution)
+- path access checks for runtime workdir
+- persistent audit logging in JSON-lines style (`AGENTD_SANDBOX_AUDIT_LOG_PATH`)
 
 </section>
 

@@ -11,6 +11,7 @@ use serde_json::json;
 use tokio::process::Command;
 
 use crate::adapters::runtimes;
+use crate::adapters::security;
 use crate::domain::audit_log::{CommandAuditEntry, output_preview};
 use crate::domain::permission::{PermissionSet, RuntimeRole};
 use crate::domain::plan::Plan;
@@ -266,6 +267,7 @@ impl Provider for SandboxProvider {
     async fn run_agent(&self, request: ProviderRunRequest) -> Result<ProviderRunResult> {
         let cfg = crate::config::AppConfig::load()?;
         let sandbox_cfg = &cfg.sandbox;
+        let securable = security::build_securable(sandbox_cfg);
         let permissions = PermissionSet {
             role: RuntimeRole::from_value(&sandbox_cfg.role),
             allowed_commands: sandbox_cfg.allowed_commands.clone(),
@@ -275,8 +277,27 @@ impl Provider for SandboxProvider {
 
         // Trim whitespace from prompt for validation
         let prompt_trimmed = request.prompt.trim();
+        let cmd_parts: Vec<&str> = prompt_trimmed.split_whitespace().collect();
+        let main_cmd = cmd_parts.first().copied().unwrap_or("");
 
-        if !permissions.can_execute_any_command() {
+        let role_allowed = securable
+            .check_command_access(main_cmd, permissions.role.as_str())
+            .await?;
+
+        if !permissions.can_execute_any_command() || !role_allowed {
+            let denied = CommandAuditEntry {
+                ts: Utc::now(),
+                agent_id: request.agent_id.clone(),
+                role: permissions.role.as_str().to_string(),
+                runtime: sandbox_cfg.runtime.clone(),
+                command_input: prompt_trimmed.to_string(),
+                command_output_preview: String::new(),
+                allowed: false,
+                exit_code: None,
+            };
+            let denied_payload =
+                serde_json::to_string(&denied).context("failed to serialize denied audit event")?;
+            securable.log_audit_event(&denied_payload).await?;
             bail!(
                 "command execution denied for role '{}'",
                 permissions.role.as_str()
@@ -284,22 +305,57 @@ impl Provider for SandboxProvider {
         }
 
         // Validate command against ACL
-        if !permissions.bypass_acl() && !sandbox_cfg.allowed_commands.is_empty() {
-            let cmd_parts: Vec<&str> = prompt_trimmed.split_whitespace().collect();
-            if !cmd_parts.is_empty() {
-                let main_cmd = cmd_parts[0];
-                if !is_command_allowed(main_cmd, &sandbox_cfg.allowed_commands) {
-                    bail!(
-                        "command not allowed: '{}' (not in allowed_commands)",
-                        main_cmd
-                    );
-                }
-            }
+        if !permissions.bypass_acl()
+            && !sandbox_cfg.allowed_commands.is_empty()
+            && !cmd_parts.is_empty()
+            && !is_command_allowed(main_cmd, &sandbox_cfg.allowed_commands)
+        {
+            let denied = CommandAuditEntry {
+                ts: Utc::now(),
+                agent_id: request.agent_id.clone(),
+                role: permissions.role.as_str().to_string(),
+                runtime: sandbox_cfg.runtime.clone(),
+                command_input: prompt_trimmed.to_string(),
+                command_output_preview: String::new(),
+                allowed: false,
+                exit_code: None,
+            };
+            let denied_payload =
+                serde_json::to_string(&denied).context("failed to serialize denied audit event")?;
+            securable.log_audit_event(&denied_payload).await?;
+            bail!(
+                "command not allowed: '{}' (not in allowed_commands)",
+                main_cmd
+            );
         }
 
         // Create agent-specific workdir
         let agent_workdir = sandbox_cfg.workdir.join(&request.agent_id);
         fs::create_dir_all(&agent_workdir).context("failed to create agent workdir")?;
+
+        let has_workdir_access = securable
+            .check_file_access(&agent_workdir, permissions.role.as_str())
+            .await?;
+        if !has_workdir_access {
+            let denied = CommandAuditEntry {
+                ts: Utc::now(),
+                agent_id: request.agent_id.clone(),
+                role: permissions.role.as_str().to_string(),
+                runtime: sandbox_cfg.runtime.clone(),
+                command_input: format!("workdir:{}", agent_workdir.display()),
+                command_output_preview: String::new(),
+                allowed: false,
+                exit_code: None,
+            };
+            let denied_payload =
+                serde_json::to_string(&denied).context("failed to serialize denied audit event")?;
+            securable.log_audit_event(&denied_payload).await?;
+            bail!(
+                "file access denied for role '{}' on {}",
+                permissions.role.as_str(),
+                agent_workdir.display()
+            );
+        }
 
         // Validate read paths
         for read_path in &sandbox_cfg.allowed_read_paths {
@@ -371,18 +427,21 @@ impl Provider for SandboxProvider {
         };
 
         // Compose tracing data
-        let tracing = if sandbox_cfg.trace_commands || sandbox_cfg.trace_diff {
-            let audit = CommandAuditEntry {
-                ts: Utc::now(),
-                agent_id: request.agent_id.clone(),
-                role: permissions.role.as_str().to_string(),
-                runtime: resolved_runtime.runtime.clone(),
-                command_input: prompt_trimmed.to_string(),
-                command_output_preview: output_preview(&output, 300),
-                allowed: true,
-                exit_code: Some(exit_code),
-            };
+        let audit = CommandAuditEntry {
+            ts: Utc::now(),
+            agent_id: request.agent_id.clone(),
+            role: permissions.role.as_str().to_string(),
+            runtime: resolved_runtime.runtime.clone(),
+            command_input: prompt_trimmed.to_string(),
+            command_output_preview: output_preview(&output, 300),
+            allowed: true,
+            exit_code: Some(exit_code),
+        };
+        let audit_payload =
+            serde_json::to_string(&audit).context("failed to serialize audit event")?;
+        securable.log_audit_event(&audit_payload).await?;
 
+        let tracing = if sandbox_cfg.trace_commands || sandbox_cfg.trace_diff {
             json!({
                 "timestamp": Utc::now().to_rfc3339(),
                 "agent_id": request.agent_id,

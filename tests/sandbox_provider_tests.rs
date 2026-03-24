@@ -29,6 +29,12 @@ fn temp_sandbox_dir() -> String {
     path.to_string_lossy().to_string()
 }
 
+fn temp_audit_path() -> String {
+    let mut path = PathBuf::from(std::env::temp_dir());
+    path.push(format!("agentd-audit-{}.log", Uuid::new_v4()));
+    path.to_string_lossy().to_string()
+}
+
 struct EnvGuard {
     _guard: MutexGuard<'static, ()>,
     entries: Vec<(String, Option<String>)>,
@@ -371,6 +377,49 @@ async fn sandbox_provider_tracing_contains_metadata() {
         "missing audit command_output_preview"
     );
     assert!(msg.contains("workdir"), "missing workdir");
+}
+
+#[tokio::test]
+async fn sandbox_provider_persists_audit_log_entries() {
+    let sandbox_dir = temp_sandbox_dir();
+    let db_path = temp_db_path();
+    let audit_path = temp_audit_path();
+
+    let _env = EnvGuard::set(&[
+        ("AGENTD_SANDBOX_RUNTIME", "process".to_string()),
+        ("AGENTD_SANDBOX_ROLE", "operator".to_string()),
+        ("AGENTD_SANDBOX_WORKDIR", sandbox_dir.clone()),
+        ("AGENTD_SANDBOX_AUDIT_LOG_PATH", audit_path.clone()),
+        ("AGENTD_SANDBOX_TRACE_COMMANDS", "true".to_string()),
+        ("AGENTD_SANDBOX_TRACE_DIFF", "false".to_string()),
+    ]);
+
+    let app = App::new(db_path.clone(), test_output_options()).expect("create app");
+    app.spawn("audit_test", "sandbox", "echo audited", 5, 0, None)
+        .await
+        .expect("spawn audit test agent");
+
+    let store = SqliteStore::new(db_path);
+    let agents = store.list_agents().expect("list agents");
+    let agent_id = agents[0].id.clone();
+
+    app.attach(&agent_id, 5, 0, false, false, None)
+        .await
+        .expect("attach audit test agent");
+
+    let audit_content = fs::read_to_string(&audit_path).expect("read audit log file");
+    assert!(
+        audit_content.contains("\"agent_id\""),
+        "audit log should contain agent id field"
+    );
+    assert!(
+        audit_content.contains("\"command_input\":\"echo audited\""),
+        "audit log should contain command input"
+    );
+    assert!(
+        audit_content.contains("\"allowed\":true"),
+        "audit log should contain allowed=true"
+    );
 }
 
 #[tokio::test]

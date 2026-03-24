@@ -36,7 +36,7 @@
   - `mock.rs` operational
   - `cli_provider.rs` operational
   - `http_provider.rs` operational
-  - `sandbox_provider.rs` operational with ACL and diff tracing hooks
+  - `sandbox_provider.rs` operational with ACL/RBAC checks, runtime selection, diff tracing, and audit persistence
 - Expected output mapping: provider response -> domain/app result + logs.
 
 </section>
@@ -44,9 +44,11 @@
 ## <section id="runtime-layer"> Runtime Layer
 
 - Ports: `src/ports/runtime.rs`, `src/ports/process.rs`, `src/ports/resource.rs`.
+- Security port: `src/ports/securable.rs`.
 - Domain: `src/domain/runtime_config.rs`, `src/domain/process_handle.rs`, `src/domain/resource_limit.rs`.
 - Adapter factory: `src/adapters/runtimes/mod.rs`.
 - Built-in adapter: `src/adapters/runtimes/builtin.rs`.
+- Security adapter: `src/adapters/security/local_securable.rs`.
 - Runtime precedence is resolved explicitly: plan step runtime -> CLI runtime override -> config runtime.
 
 </section>
